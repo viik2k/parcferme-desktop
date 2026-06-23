@@ -10,12 +10,15 @@
 
 use std::time::Duration;
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
 
 /// Production web origin; override with `PARCFERME_API_URL` for local dev.
-pub const DEFAULT_BASE_URL: &str = "https://parcferme.cc";
+/// Note the `www.` — the apex `parcferme.cc` 308-redirects here, and a 308 on
+/// POST isn't followed, so we target the canonical host directly.
+pub const DEFAULT_BASE_URL: &str = "https://www.parcferme.cc";
 /// OAuth client identifier for the desktop tray app.
 pub const CLIENT_ID: &str = "pf-desktop";
 /// Device-grant type per RFC 8628.
@@ -112,15 +115,20 @@ impl ApiClient {
     /// Start the device-authorization grant: ask the server for a device/user
     /// code pair (RFC 8628 §3.1).
     pub fn request_device_code(&self) -> Result<DeviceCodeResponse> {
-        let resp = self
+        let result = self
             .agent
             .post(&self.url("/api/device/code"))
             .send_json(serde_json::json!({
                 "client_id": CLIENT_ID,
                 "scope": "setups:download",
-            }))
-            .map_err(map_transport)?;
-        resp.into_json().map_err(Error::from)
+            }));
+        match result {
+            Ok(resp) => read_json(resp),
+            Err(ureq::Error::Status(code, _)) => Err(Error::Api(format!(
+                "server returned HTTP {code} for /api/device/code — is the ParcFermé desktop API deployed at this URL?"
+            ))),
+            Err(e) => Err(map_transport(e)),
+        }
     }
 
     /// Poll the token endpoint once (RFC 8628 §3.4). Maps the standardized
@@ -136,7 +144,7 @@ impl ApiClient {
             }));
 
         match result {
-            Ok(resp) => Ok(TokenPoll::Granted(resp.into_json()?)),
+            Ok(resp) => Ok(TokenPoll::Granted(read_json(resp)?)),
             // RFC 8628 signals pending/slow_down/etc. as 4xx with an `error` body.
             Err(ureq::Error::Status(_, resp)) => {
                 let body: ErrorBody = resp.into_json().unwrap_or_default();
@@ -162,6 +170,27 @@ fn map_token_error(code: &str) -> TokenPoll {
 
 fn map_transport(err: ureq::Error) -> Error {
     Error::Http(err.to_string())
+}
+
+/// Parse a successful response as JSON, but fail with a *clear* message when the
+/// server returns something else — an HTML 404, an apex→www redirect body, or a
+/// proxy error page — instead of the cryptic underlying parse error.
+fn read_json<T: DeserializeOwned>(resp: ureq::Response) -> Result<T> {
+    let status = resp.status();
+    let content_type = resp.content_type().to_string();
+    if !content_type.contains("json") {
+        let snippet: String = resp
+            .into_string()
+            .unwrap_or_default()
+            .chars()
+            .take(80)
+            .collect();
+        return Err(Error::Api(format!(
+            "expected JSON but got HTTP {status} ({content_type}). Is the desktop API deployed at this URL? Response began: {snippet:?}"
+        )));
+    }
+    resp.into_json()
+        .map_err(|e| Error::Api(format!("invalid JSON from server (HTTP {status}): {e}")))
 }
 
 /// Strip a trailing slash so `url()` can join paths uniformly.
