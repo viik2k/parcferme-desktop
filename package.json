@@ -1,0 +1,15 @@
+{
+  "name": "parcferme-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ParcFerme desktop tray client — Tauri (Rust core + web UI)",
+  "packageManager": "pnpm@11.8.0",
+  "scripts": {
+    "dev": "pnpm --filter pf_desk tauri dev",
+    "build": "pnpm --filter pf_desk tauri build",
+    "icon": "pnpm --filter pf_desk tauri icon",
+    "lint:rust": "cargo clippy --workspace --all-targets",
+    "fmt:rust": "cargo fmt --all",
+    "test:rust": "cargo test --workspace"
+  }
+}

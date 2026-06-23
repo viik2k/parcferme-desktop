@@ -1,0 +1,24 @@
+[package]
+name = "pf_desk"
+description = "ParcFerme desktop tray client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# The shell is a thin wrapper; the reusable logic is exposed as a lib so the
+# desktop binary (and, later, integration tests) share one entry point.
+[lib]
+name = "pf_desk_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+pf_core = { workspace = true }

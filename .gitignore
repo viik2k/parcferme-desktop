@@ -1,0 +1,23 @@
+# Rust / Cargo
+/target
+**/target
+
+# Node
+node_modules/
+dist/
+.pnpm-store/
+
+# Tauri generated
+apps/pf_desk/src-tauri/gen/
+
+# Secrets / local env
+.env
+.env.*
+*.local
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

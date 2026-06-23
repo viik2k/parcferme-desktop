@@ -1,0 +1,34 @@
+# Cargo workspace root.
+#
+# The architectural bet (see Build Plan §3): ALL logic lives in `pf_core`, a
+# plain Rust library with no UI. `pf_desk` (the Tauri shell) only does
+# windowing, the tray, and toasts. A future CLI or push-daemon becomes new
+# functions in `pf_core`, not a new app.
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/pf_core",
+    "apps/pf_desk/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["OMLabs"]
+repository = "https://github.com/omlabs/parcferme-desktop"
+
+[workspace.dependencies]
+pf_core = { path = "crates/pf_core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# Slim release binaries — this is a tray utility that runs alongside iRacing.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

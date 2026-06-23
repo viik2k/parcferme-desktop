@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+/* Brand tokens, mirrored from the parcferme.cc web app (globals.css) so the
+   desktop client reads as the same product. */
+@theme {
+  --color-background: #0a0a0a;
+  --color-foreground: #e5e5e5;
+  --color-card: #1a1a1a;
+  --color-border: #262626;
+  --color-muted: #737373;
+  --color-primary: #f59e0b;
+  --color-primary-foreground: #0a0a0a;
+  --color-destructive: #ef4444;
+  --color-success: #22c55e;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
