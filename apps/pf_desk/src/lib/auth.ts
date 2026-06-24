@@ -9,6 +9,7 @@ export interface DeviceUser {
 
 export interface AuthStatus {
   linked: boolean;
+  user: DeviceUser | null;
 }
 
 /** Mirrors `commands::DeviceFlowDto`. */

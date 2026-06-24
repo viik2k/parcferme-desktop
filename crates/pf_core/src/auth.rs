@@ -11,10 +11,14 @@
 use crate::api::{ApiClient, DeviceUser, TokenPoll};
 use crate::{Error, Result};
 
-/// Keychain coordinates. Service matches the app's bundle identifier; the
-/// single account holds the current device token.
+/// Keychain coordinates. Service matches the app's bundle identifier. One
+/// account holds the secret device token; a second holds the linked user's
+/// display profile so "Signed in as @user" (name + avatar) survives a restart
+/// without a network round-trip. The profile is not a secret, but co-locating
+/// it with the token keeps a single store and a single `sign_out` to clear.
 const KEYCHAIN_SERVICE: &str = "cc.parcferme.desktop";
 const KEYCHAIN_ACCOUNT: &str = "device-token";
+const KEYCHAIN_USER_ACCOUNT: &str = "device-user";
 
 /// A long-lived, server-revocable device token. Held transiently in memory; at
 /// rest it lives in the OS keychain. Listed under Account → Devices on the
@@ -77,6 +81,12 @@ pub fn poll_device_flow(client: &ApiClient, device_code: &str) -> Result<FlowOut
     match client.poll_device_token(device_code)? {
         TokenPoll::Granted(token) => {
             store_token(&token.access_token)?;
+            // Cache the profile so the linked state can render after a restart
+            // (auth_status reads it back). Best-effort: a cache write failure
+            // must not fail the link — the token is what makes us signed in.
+            if let Some(user) = token.user.as_ref() {
+                let _ = store_user(user);
+            }
             Ok(FlowOutcome::Linked { user: token.user })
         }
         TokenPoll::Pending => Ok(FlowOutcome::Pending),
@@ -107,9 +117,38 @@ pub fn store_token(token: &str) -> Result<()> {
         .map_err(|e| Error::Keychain(e.to_string()))
 }
 
-/// Forget the stored token (Sign out). Idempotent — succeeds if none exists.
+/// The linked user's cached display profile, if one was stored at link time.
+///
+/// Used to render "Signed in as @user" on startup without a network call. A
+/// corrupt or absent cache is not an error — we just have no profile to show
+/// (the device is still linked as long as [`current_token`] returns a token).
+pub fn cached_user() -> Result<Option<DeviceUser>> {
+    match user_entry()?.get_password() {
+        Ok(json) => Ok(serde_json::from_str(&json).ok()),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(Error::Keychain(e.to_string())),
+    }
+}
+
+/// Persist the linked user's display profile, replacing any existing one.
+pub fn store_user(user: &DeviceUser) -> Result<()> {
+    let json = serde_json::to_string(user).map_err(|e| Error::Api(e.to_string()))?;
+    user_entry()?
+        .set_password(&json)
+        .map_err(|e| Error::Keychain(e.to_string()))
+}
+
+/// Forget the stored token and cached profile (Sign out). Idempotent — succeeds
+/// if either is already absent.
 pub fn sign_out() -> Result<()> {
-    match entry()?.delete_credential() {
+    delete_entry(entry()?)?;
+    delete_entry(user_entry()?)?;
+    Ok(())
+}
+
+/// Delete one keychain credential, treating "not found" as success.
+fn delete_entry(entry: keyring::Entry) -> Result<()> {
+    match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(Error::Keychain(e.to_string())),
     }
@@ -120,9 +159,30 @@ fn entry() -> Result<keyring::Entry> {
         .map_err(|e| Error::Keychain(e.to_string()))
 }
 
+fn user_entry() -> Result<keyring::Entry> {
+    keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER_ACCOUNT)
+        .map_err(|e| Error::Keychain(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The cached-profile format is just JSON; verify a user survives the
+    // serialize→deserialize the keychain cache uses, independent of the OS store.
+    #[test]
+    fn cached_user_json_round_trips() {
+        let user = DeviceUser {
+            id: "u_123".into(),
+            name: Some("Finn".into()),
+            image: Some("https://www.parcferme.cc/api/avatars/u_123?v=1".into()),
+        };
+        let json = serde_json::to_string(&user).unwrap();
+        let back: DeviceUser = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, user.id);
+        assert_eq!(back.name, user.name);
+        assert_eq!(back.image, user.image);
+    }
 
     // Hits the real OS keychain, so it's opt-in (`cargo test -- --ignored`) to
     // keep CI hermetic. Uses a throwaway account and cleans up after itself.

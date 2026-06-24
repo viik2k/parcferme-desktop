@@ -66,6 +66,22 @@ pub struct TokenResponse {
     pub user: Option<DeviceUser>,
 }
 
+/// Everything the desktop needs to install one setup file, returned by the
+/// device download endpoint (`GET /api/device/setups/{uuid}/download`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct DownloadInfo {
+    /// Short-lived presigned R2 URL for the `.sto` bytes.
+    pub url: String,
+    /// The setup file's name, e.g. `baseline_spa.sto`. Sanitized before use.
+    pub filename: String,
+    /// Car display name — becomes the `setups\<car>\` subfolder.
+    #[serde(default)]
+    pub car: String,
+    /// Setup's display name, for the success toast.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 /// Outcome of one poll of the device-token endpoint.
 #[derive(Debug)]
 pub enum TokenPoll {
@@ -144,13 +160,70 @@ impl ApiClient {
             }));
 
         match result {
-            Ok(resp) => Ok(TokenPoll::Granted(read_json(resp)?)),
+            Ok(resp) => {
+                let mut token: TokenResponse = read_json(resp)?;
+                // The web API returns custom avatars as same-origin *relative*
+                // URLs (e.g. `/api/avatars/{id}?v=…`). Those resolve against the
+                // webview's own origin (`tauri://localhost`), where no such route
+                // exists, so the `<img>` 404s. Resolve against our API origin so
+                // the avatar loads. OAuth avatars are already absolute CDN URLs
+                // and pass through untouched.
+                if let Some(user) = token.user.as_mut() {
+                    if let Some(image) = user.image.take() {
+                        user.image = Some(self.absolutize(image));
+                    }
+                }
+                Ok(TokenPoll::Granted(token))
+            }
             // RFC 8628 signals pending/slow_down/etc. as 4xx with an `error` body.
             Err(ureq::Error::Status(_, resp)) => {
                 let body: ErrorBody = resp.into_json().unwrap_or_default();
                 Ok(map_token_error(&body.error))
             }
             Err(e) => Err(map_transport(e)),
+        }
+    }
+
+    /// Resolve a setup by its public UUID into a presigned download, presenting
+    /// the device token. The server runs the *same* private/`setupShares` access
+    /// check it applies to a browser session (Build Plan §6, audit #2).
+    pub fn get_download(&self, setup_uuid: &str, token: &str) -> Result<DownloadInfo> {
+        let result = self
+            .agent
+            .get(&self.url(&format!("/api/device/setups/{setup_uuid}/download")))
+            .set("Authorization", &format!("Bearer {token}"))
+            .call();
+        match result {
+            Ok(resp) => read_json(resp),
+            Err(ureq::Error::Status(401, _)) => Err(Error::Api(
+                "this device is no longer authorized — sign out and reconnect".into(),
+            )),
+            Err(ureq::Error::Status(403, _)) => {
+                Err(Error::Api("you don't have access to this setup".into()))
+            }
+            Err(ureq::Error::Status(404, _)) => Err(Error::Api("setup not found".into())),
+            Err(ureq::Error::Status(code, resp)) => {
+                let body: ErrorBody = resp.into_json().unwrap_or_default();
+                let detail = if body.error.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", body.error)
+                };
+                Err(Error::Api(format!("download failed (HTTP {code}){detail}")))
+            }
+            Err(e) => Err(map_transport(e)),
+        }
+    }
+
+    /// Resolve a possibly-relative URL returned by the web API against this
+    /// client's origin. Absolute `http(s)` URLs are returned unchanged.
+    fn absolutize(&self, url: String) -> String {
+        if url.starts_with("http://") || url.starts_with("https://") {
+            url
+        } else if url.starts_with('/') {
+            format!("{}{url}", self.base_url)
+        } else {
+            format!("{}/{url}", self.base_url)
         }
     }
 }
@@ -219,5 +292,23 @@ mod tests {
     fn base_url_normalized_and_joined() {
         let c = ApiClient::new("https://example.com/");
         assert_eq!(c.url("/api/device/code"), "https://example.com/api/device/code");
+    }
+
+    #[test]
+    fn absolutize_resolves_relative_but_leaves_absolute() {
+        let c = ApiClient::new("https://www.parcferme.cc");
+        // Same-origin relative avatar URL gets the API origin prepended.
+        assert_eq!(
+            c.absolutize("/api/avatars/abc?v=123".to_string()),
+            "https://www.parcferme.cc/api/avatars/abc?v=123"
+        );
+        // Relative without a leading slash still joins cleanly.
+        assert_eq!(
+            c.absolutize("api/avatars/abc".to_string()),
+            "https://www.parcferme.cc/api/avatars/abc"
+        );
+        // Absolute CDN URLs (OAuth avatars) are untouched.
+        let cdn = "https://cdn.discordapp.com/avatars/1/2.png".to_string();
+        assert_eq!(c.absolutize(cdn.clone()), cdn);
     }
 }

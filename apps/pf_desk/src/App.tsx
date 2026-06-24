@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import logo from "./assets/logo.png";
 import { ConnectPanel } from "./components/ConnectPanel";
 import { Connected } from "./components/Connected";
+import { DownloadPanel } from "./components/DownloadPanel";
 import { authStatus, type DeviceUser } from "./lib/auth";
 
 function App() {
@@ -12,6 +13,7 @@ function App() {
     try {
       const status = await authStatus();
       setLinked(status.linked);
+      setUser(status.user);
     } catch {
       setLinked(false);
     }
@@ -35,13 +37,16 @@ function App() {
         {linked === null ? (
           <p className="text-center text-sm text-muted">Checking…</p>
         ) : linked ? (
-          <Connected
-            user={user}
-            onSignedOut={() => {
-              setUser(null);
-              setLinked(false);
-            }}
-          />
+          <div className="flex flex-col gap-6">
+            <Connected
+              user={user}
+              onSignedOut={() => {
+                setUser(null);
+                setLinked(false);
+              }}
+            />
+            <DownloadPanel />
+          </div>
         ) : (
           <ConnectPanel
             onLinked={(u) => {

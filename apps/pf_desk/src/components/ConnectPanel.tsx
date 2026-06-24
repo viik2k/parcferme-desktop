@@ -19,12 +19,18 @@ export function ConnectPanel({
   const [message, setMessage] = useState<string | null>(null);
   const cancelled = useRef(false);
 
-  useEffect(
-    () => () => {
+  // Reset on setup, not just at ref creation: React StrictMode mounts twice
+  // (setup → cleanup → setup) in dev, and the cleanup flips this to `true`. If
+  // we only seeded `false` at creation, the ref would stay `true` after remount
+  // and every poll tick would bail at the guard below — the flow would never
+  // recognise approval. Re-seeding in setup keeps the guard correct in both
+  // StrictMode's double-mount and a real unmount.
+  useEffect(() => {
+    cancelled.current = false;
+    return () => {
       cancelled.current = true;
-    },
-    [],
-  );
+    };
+  }, []);
 
   function schedulePoll(f: DeviceFlow, intervalSecs: number) {
     window.setTimeout(async () => {

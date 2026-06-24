@@ -77,6 +77,8 @@ pub fn run() {
             commands::connect_begin,
             commands::connect_poll,
             commands::sign_out,
+            commands::setups_dir,
+            commands::download_setup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the ParcFerme tray app");

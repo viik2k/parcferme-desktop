@@ -28,6 +28,12 @@ pub enum Error {
     #[error("keychain error: {0}")]
     Keychain(String),
 
+    /// The sim setups directory doesn't exist at the detected or override
+    /// location. The string is the path we looked for, so Settings can guide
+    /// the user to set an override.
+    #[error("setups folder not found: {0}")]
+    SetupsDirNotFound(String),
+
     /// Filesystem I/O failure (path detection, atomic write, …).
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
