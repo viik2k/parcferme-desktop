@@ -13,6 +13,7 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::sim::Sim;
 use crate::{Error, Result};
 
 /// Production web origin; override with `PARCFERME_API_URL` for local dev.
@@ -70,13 +71,23 @@ pub struct TokenResponse {
 /// device download endpoint (`GET /api/device/setups/{uuid}/download`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct DownloadInfo {
-    /// Short-lived presigned R2 URL for the `.sto` bytes.
+    /// Short-lived presigned R2 URL for the setup bytes.
     pub url: String,
     /// The setup file's name, e.g. `baseline_spa.sto`. Sanitized before use.
     pub filename: String,
-    /// Car display name — becomes the `setups\<car>\` subfolder.
+    /// Which sim this setup is for — picks the destination folder + layout.
+    /// Absent → iRacing, so a single-sim M2 server keeps working unchanged.
+    #[serde(default)]
+    pub sim: Sim,
+    /// Car folder name — becomes the `<car>\` subfolder. Should be the sim's
+    /// internal folder id (e.g. `ferrari_488_gt3_evo`), not a display name, or
+    /// the sim may not list the setup. See the SERVER_CONTRACT caveat.
     #[serde(default)]
     pub car: String,
+    /// Track folder name. Required by ACC (`<car>\<track>\`), ignored by sims
+    /// that don't nest by track.
+    #[serde(default)]
+    pub track: Option<String>,
     /// Setup's display name, for the success toast.
     #[serde(default)]
     pub name: Option<String>,
@@ -280,18 +291,50 @@ mod tests {
 
     #[test]
     fn token_error_codes_map_to_outcomes() {
-        assert!(matches!(map_token_error("authorization_pending"), TokenPoll::Pending));
+        assert!(matches!(
+            map_token_error("authorization_pending"),
+            TokenPoll::Pending
+        ));
         assert!(matches!(map_token_error("slow_down"), TokenPoll::SlowDown));
-        assert!(matches!(map_token_error("access_denied"), TokenPoll::Denied));
-        assert!(matches!(map_token_error("expired_token"), TokenPoll::Expired));
+        assert!(matches!(
+            map_token_error("access_denied"),
+            TokenPoll::Denied
+        ));
+        assert!(matches!(
+            map_token_error("expired_token"),
+            TokenPoll::Expired
+        ));
         // Unknown fails closed.
         assert!(matches!(map_token_error("weird"), TokenPoll::Expired));
     }
 
     #[test]
+    fn download_info_defaults_to_iracing_and_reads_sim_track() {
+        // Single-sim M2 server: no `sim`/`track` → iRacing, no track.
+        let legacy: DownloadInfo = serde_json::from_str(
+            r#"{ "url": "https://r2/x", "filename": "baseline.sto", "car": "ferrari296gt3" }"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.sim, Sim::IRacing);
+        assert_eq!(legacy.track, None);
+
+        // Multi-sim server: explicit ACC setup with a track.
+        let acc: DownloadInfo = serde_json::from_str(
+            r#"{ "url": "https://r2/y", "filename": "quali.json",
+                 "sim": "acc", "car": "ferrari_488_gt3_evo", "track": "spa" }"#,
+        )
+        .unwrap();
+        assert_eq!(acc.sim, Sim::Acc);
+        assert_eq!(acc.track.as_deref(), Some("spa"));
+    }
+
+    #[test]
     fn base_url_normalized_and_joined() {
         let c = ApiClient::new("https://example.com/");
-        assert_eq!(c.url("/api/device/code"), "https://example.com/api/device/code");
+        assert_eq!(
+            c.url("/api/device/code"),
+            "https://example.com/api/device/code"
+        );
     }
 
     #[test]

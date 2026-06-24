@@ -5,42 +5,71 @@
 //! **atomic** (temp file + rename) so a half-downloaded file can't be loaded
 //! in-sim. See Build Plan §6.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::api::ApiClient;
+use crate::sim::Sim;
 use crate::{auth, paths, Error, Result};
 
-/// A setup file successfully written into the sim folder. Drives the UI toast.
+/// A setup file successfully written into a sim folder. Drives the UI toast.
 #[derive(Debug, Clone)]
 pub struct InstalledSetup {
-    /// Absolute path of the written `.sto` file.
+    /// Absolute path of the written setup file.
     pub path: PathBuf,
-    /// Car the setup is for (its `setups\<car>\` subfolder).
+    /// Which sim it was installed for.
+    pub sim: Sim,
+    /// Car the setup is for (its `<car>\` subfolder).
     pub car: String,
+    /// Track subfolder, for sims that nest by track (ACC).
+    pub track: Option<String>,
     /// Setup display name, if the server provided one.
     pub name: Option<String>,
 }
 
-/// The M2 manual-pull path end to end: authorize this device, ask the server to
+/// The manual-pull path end to end: authorize this device, ask the server to
 /// presign the setup identified by `setup_uuid`, then atomically write the bytes
-/// into `setups\<car>\<file>.sto`. `override_dir` is the optional Settings
-/// override for a non-default setups folder.
-pub fn download_setup(setup_uuid: &str, override_dir: Option<PathBuf>) -> Result<InstalledSetup> {
+/// into the destination sim's folder (`<car>` or `<car>\<track>`).
+///
+/// The sim comes from the server response, so `overrides` is a per-sim map of
+/// Settings folder overrides; the entry for the resolved sim (if any) wins over
+/// detection.
+pub fn download_setup(
+    setup_uuid: &str,
+    overrides: &HashMap<Sim, PathBuf>,
+) -> Result<InstalledSetup> {
     let token = auth::current_token()?
         .ok_or_else(|| Error::Api("not connected — link this device first".into()))?;
 
     let info = ApiClient::from_env().get_download(setup_uuid, token.as_str())?;
 
-    let setups_dir = paths::resolve_setups_dir(override_dir)?;
-    let car_dir = paths::car_subdir(&setups_dir, &info.car);
-    let path = download_into(&info.url, &car_dir, &info.filename)?;
+    let setups_dir = paths::resolve_setups_dir(info.sim, overrides.get(&info.sim).cloned())?;
+    let target_dir =
+        paths::setup_target_dir(&setups_dir, info.sim, &info.car, info.track.as_deref());
+    let path = download_into(&info.url, &target_dir, &info.filename)?;
 
     Ok(InstalledSetup {
         path,
+        sim: info.sim,
         car: info.car,
+        track: info.track,
         name: info.name,
     })
+}
+
+/// Parse a `parcferme://equip?…` deep link and run the full install for the
+/// setup it names (the M3 handshake). The link only *names* a setup; the download
+/// is authorized exactly like a manual pull — this device's stored token plus the
+/// server's access check — so an unlinked device or an inaccessible setup fails
+/// cleanly. `overrides` are the per-sim folder overrides (empty for the deep-link
+/// path until persisted Settings land in M4).
+pub fn install_from_equip_link(
+    url: &str,
+    overrides: &HashMap<Sim, PathBuf>,
+) -> Result<InstalledSetup> {
+    let req = crate::deeplink::parse(url)?;
+    download_setup(&req.setup_id, overrides)
 }
 
 /// Extract a setup UUID from a pasted parcferme.cc setup URL, or accept a bare
@@ -154,7 +183,10 @@ mod tests {
 
         assert_eq!(path, dir.join("pwned.sto"));
         assert!(path.starts_with(&dir), "must not escape the dest dir");
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[setup]\nrearwing=3\n");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[setup]\nrearwing=3\n"
+        );
         // No leftover temp artifact.
         assert!(!dir.join(".pwned.sto.part").exists());
 
@@ -174,7 +206,10 @@ mod tests {
             Some(uuid.to_string())
         );
         // A bare UUID is accepted.
-        assert_eq!(extract_setup_uuid(&format!("  {uuid}  ")), Some(uuid.to_string()));
+        assert_eq!(
+            extract_setup_uuid(&format!("  {uuid}  ")),
+            Some(uuid.to_string())
+        );
         // Non-UUIDs are rejected so we never fire a doomed request.
         assert_eq!(extract_setup_uuid("https://www.parcferme.cc/setups/"), None);
         assert_eq!(extract_setup_uuid("not a setup link"), None);

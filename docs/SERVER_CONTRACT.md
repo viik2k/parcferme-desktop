@@ -93,7 +93,69 @@ then reuse the **exact** body of `downloadSetupVersion` (look up version →
 `generatePresignedUrl`). No new access logic — that is what keeps audit #2 closed
 for the non-browser caller.
 
+### Response shape (`GET /api/device/setups/{uuid}/download`)
+
+```jsonc
+{
+  "url": "<presigned R2 GET>",   // required
+  "filename": "quali_spa.json",  // required; the setup file name as saved in-sim
+  "sim": "acc",                  // "iracing" | "acc" | "lmu"; omit ⇒ iracing
+  "car": "ferrari_488_gt3_evo",  // the sim's INTERNAL folder id (see caveat)
+  "track": "spa",                // ACC only; required for the setup to list in-game
+  "name": "Quali — Spa"          // display name, for the toast (optional)
+}
+```
+
+The client (`pf_core`) routes the file by `sim`:
+
+| sim       | folder under Documents                                  | layout            |
+| :-------- | :------------------------------------------------------ | :---------------- |
+| `iracing` | `iRacing\setups`                                        | `<car>\`          |
+| `acc`     | `Assetto Corsa Competizione\Setups`                     | `<car>\<track>\`  |
+| `lmu`     | `Le Mans Ultimate\UserData\player\Settings` *(unverified)* | `<car>\`       |
+
+> **`car`/`track` must be the sim's internal folder ids, not display names.**
+> Each sim lists a setup only when it sits in the exact folder it expects:
+> iRacing keys by the car's internal folder (e.g. `ferrari296gt3`), ACC by its
+> car model + track folders (e.g. `ferrari_488_gt3_evo\spa`). `cars.name` is a
+> display name and won't match — the server must map `cars.simRefId` (or a new
+> per-sim folder column) to the real folder id before returning it. Until then
+> files land in a human-named folder and may not appear in-sim. (Carried over
+> from the M2 iRacing caveat; now applies per sim.)
+>
+> **LMU path is unverified** against a live Le Mans Ultimate install — confirm
+> the `UserData\player\Settings` layout before relying on the LMU flow.
+
+## 6. M3 "Equip" deep link (web → desktop)
+
+The handshake is a **custom URL scheme** the desktop registers: `parcferme://`.
+The website's **Equip** button opens:
+
+```
+parcferme://equip?setup=<setupId>
+```
+
+- `setup` — the setup's public UUID (same id as `/setups/<uuid>` and the §5
+  download endpoint). Aliases also accepted by the client: `setupId`, `id`,
+  `versionId`.
+- `token` (optional, alias `sig`) — reserved for a short-lived signed payload if
+  you later want link-level validation. **Not required for v1:** the client does
+  not yet send it onward, and the download is already authorized by the device
+  token + the §5 access check, so the link alone grants nothing.
+
+How to emit it from the web: a plain anchor/redirect to the `parcferme://…` URL
+(e.g. `window.location.href = "parcferme://equip?setup=" + id`). No new server
+endpoint is needed — clicking it hands the setup id to the running tray app,
+which then calls the **existing** §5 download endpoint as this device.
+
+Desktop behaviour (`pf_core::deeplink::parse` → `download::install_from_equip_link`):
+parse + UUID-validate → reveal window → download via §5 → emit an `equip-result`
+event the UI shows as a toast. Not-signed-in / no-access / network failures come
+back as a clear error in the same toast. Cold start (app launched by the link)
+and warm start (already running) are both handled.
+
 ## Client knobs
 
 - Base URL: `PARCFERME_API_URL` env (defaults to `https://parcferme.cc`).
 - Client id: `pf-desktop`. Scope: `setups:download`.
+- Deep-link scheme: `parcferme://equip?setup=<uuid>`.

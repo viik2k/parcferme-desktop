@@ -11,8 +11,10 @@ pub mod deeplink;
 pub mod download;
 mod error;
 pub mod paths;
+pub mod sim;
 
 pub use error::{Error, Result};
+pub use sim::Sim;
 
 use serde::{Deserialize, Serialize};
 

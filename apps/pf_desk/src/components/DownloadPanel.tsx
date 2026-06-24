@@ -1,43 +1,59 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  detectSims,
   downloadSetup,
-  setupsDir,
   type InstalledSetup,
+  type SimFolder,
+  type SimOverrides,
 } from "../lib/download";
 
 type Phase = "idle" | "working" | "done" | "error";
 
 export function DownloadPanel() {
-  const [dir, setDir] = useState<string | null>(null);
-  const [dirError, setDirError] = useState<string | null>(null);
-  const [override, setOverride] = useState("");
+  const [sims, setSims] = useState<SimFolder[] | null>(null);
+  // Applied overrides (drive detection + download) vs. in-progress text inputs.
+  const [overrides, setOverrides] = useState<SimOverrides>({});
+  const [drafts, setDrafts] = useState<SimOverrides>({});
   const [url, setUrl] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<InstalledSetup | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const refreshDir = useCallback(async (ov?: string) => {
+  const refreshSims = useCallback(async (ov: SimOverrides) => {
     try {
-      setDir(await setupsDir(ov));
-      setDirError(null);
-    } catch (e) {
-      setDir(null);
-      setDirError(String(e));
+      setSims(await detectSims(Object.keys(ov).length ? ov : undefined));
+    } catch {
+      setSims([]);
     }
   }, []);
 
   useEffect(() => {
-    void refreshDir();
-  }, [refreshDir]);
+    void refreshSims(overrides);
+  }, [refreshSims, overrides]);
+
+  function applyOverride(id: string) {
+    const draft = (drafts[id] ?? "").trim();
+    setOverrides((prev) => {
+      const next = { ...prev };
+      if (draft) next[id] = draft;
+      else delete next[id];
+      return next;
+    });
+  }
 
   async function handleDownload() {
     setPhase("working");
     setMessage(null);
     setResult(null);
     try {
-      const installed = await downloadSetup(url.trim(), override.trim() || undefined);
+      const installed = await downloadSetup(
+        url.trim(),
+        Object.keys(overrides).length ? overrides : undefined,
+      );
       setResult(installed);
       setPhase("done");
+      // A freshly created car/track folder may now exist — re-detect.
+      void refreshSims(overrides);
     } catch (e) {
       setMessage(String(e));
       setPhase("error");
@@ -50,35 +66,53 @@ export function DownloadPanel() {
     <div className="rounded-2xl bg-card p-6 ring-1 ring-border">
       <h2 className="text-base font-semibold">Download a setup</h2>
       <p className="mt-1 text-sm text-muted">
-        Paste a Parc Fermé setup link to install it straight into your iRacing
+        Paste a Parc Fermé setup link to install it straight into the right sim
         folder.
       </p>
 
-      {/* Setups folder status */}
-      <div className="mt-4 rounded-lg bg-background/50 px-3 py-2 text-xs ring-1 ring-border">
-        <p className="text-muted">Setups folder</p>
-        {dir ? (
-          <p className="mt-0.5 break-all font-mono text-foreground">{dir}</p>
+      {/* Per-sim setups folders */}
+      <div className="mt-4 space-y-2">
+        <p className="text-xs text-muted">Setups folders</p>
+        {sims === null ? (
+          <p className="text-xs text-muted">Detecting…</p>
         ) : (
-          <p className="mt-0.5 text-destructive">
-            {dirError ?? "Locating…"}
-          </p>
-        )}
-        {dirError && (
-          <div className="mt-2 flex gap-2">
-            <input
-              value={override}
-              onChange={(e) => setOverride(e.target.value)}
-              placeholder={String.raw`C:\Users\you\Documents\iRacing\setups`}
-              className="min-w-0 flex-1 rounded-md bg-background px-2 py-1 font-mono text-xs text-foreground ring-1 ring-border focus:outline-none focus:ring-primary"
-            />
-            <button
-              onClick={() => void refreshDir(override.trim() || undefined)}
-              className="shrink-0 rounded-md px-2 py-1 text-xs text-muted ring-1 ring-border transition hover:text-foreground"
+          sims.map((s) => (
+            <div
+              key={s.id}
+              className="rounded-lg bg-background/50 px-3 py-2 text-xs ring-1 ring-border"
             >
-              Use
-            </button>
-          </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-foreground">{s.name}</span>
+                <span
+                  className={s.found ? "text-success" : "text-muted/70"}
+                  title={s.found ? "Folder found" : "Folder not found on this PC"}
+                >
+                  {s.found ? "Found ✓" : "Not found"}
+                </span>
+              </div>
+              {s.dir && (
+                <p className="mt-0.5 break-all font-mono text-muted">{s.dir}</p>
+              )}
+              {!s.found && (
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={drafts[s.id] ?? ""}
+                    onChange={(e) =>
+                      setDrafts((d) => ({ ...d, [s.id]: e.target.value }))
+                    }
+                    placeholder={s.dir ?? "Setups folder path"}
+                    className="min-w-0 flex-1 rounded-md bg-background px-2 py-1 font-mono text-xs text-foreground ring-1 ring-border focus:outline-none focus:ring-primary"
+                  />
+                  <button
+                    onClick={() => applyOverride(s.id)}
+                    className="shrink-0 rounded-md px-2 py-1 text-xs text-muted ring-1 ring-border transition hover:text-foreground"
+                  >
+                    Use
+                  </button>
+                </div>
+              )}
+            </div>
+          ))
         )}
       </div>
 
@@ -101,6 +135,11 @@ export function DownloadPanel() {
         <div className="mt-4 rounded-lg bg-success/10 px-3 py-2 text-sm text-success ring-1 ring-success/30">
           <p className="font-medium">
             Installed{result.name ? ` “${result.name}”` : ""} ✓
+          </p>
+          <p className="mt-0.5 text-xs text-success/80">
+            {result.sim}
+            {result.car ? ` · ${result.car}` : ""}
+            {result.track ? ` · ${result.track}` : ""}
           </p>
           <p className="mt-0.5 break-all font-mono text-xs text-success/80">
             {result.path}
