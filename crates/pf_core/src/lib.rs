@@ -11,10 +11,16 @@ pub mod deeplink;
 pub mod download;
 mod error;
 pub mod paths;
+pub mod settings;
 pub mod sim;
 
 pub use error::{Error, Result};
 pub use sim::Sim;
+
+/// The app's bundle identifier — shared by the keychain service name
+/// ([`auth`]) and the settings config dir ([`settings`]), and matching
+/// `tauri.conf.json`'s `identifier` so all app data lives under one name.
+pub const APP_ID: &str = "cc.parcferme.desktop";
 
 use serde::{Deserialize, Serialize};
 

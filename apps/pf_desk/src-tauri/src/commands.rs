@@ -3,16 +3,18 @@
 //! Each command delegates to `pf_core`; no product logic lives here (Build Plan
 //! §3). Auth/network commands are `async` and run the blocking `pf_core` work on
 //! a worker thread via `spawn_blocking`, so the UI thread never stalls.
-
-use std::collections::HashMap;
-use std::path::PathBuf;
+//!
+//! Errors cross the boundary as [`CmdError`] `{ kind, message }` so the UI can
+//! attach a per-kind hint (M4 unhappy paths) instead of parsing strings.
 
 use serde::Serialize;
 use tauri::async_runtime::spawn_blocking;
+use tauri::Manager;
 
 use pf_core::api::{ApiClient, DeviceUser};
 use pf_core::auth::{self, DeviceFlow, FlowOutcome};
-use pf_core::download;
+use pf_core::download::{self, InstallAction};
+use pf_core::settings::Settings;
 use pf_core::sim::Sim;
 
 /// M0 smoke test: round-trip a message through `pf_core` and back to the UI.
@@ -21,14 +23,44 @@ pub fn ping(message: String) -> pf_core::Pong {
     pf_core::ping(&message)
 }
 
-/// Run a blocking closure on a worker thread and surface errors as `String`
-/// (Tauri serializes the `Err` arm to the UI's `catch`).
-async fn blocking<T, F>(f: F) -> Result<T, String>
+// ---------------------------------------------------------------------------
+// Errors across the IPC boundary (M4)
+// ---------------------------------------------------------------------------
+
+/// Structured command error: `kind` is [`pf_core::Error::kind`] (or a
+/// shell-local kind like `"invalid_link"`), `message` is the user-facing text.
+/// The frontend's `lib/errors.ts` mirrors the kinds.
+#[derive(Serialize, Clone)]
+pub struct CmdError {
+    pub kind: String,
+    pub message: String,
+}
+
+impl CmdError {
+    fn new(kind: &str, message: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl From<pf_core::Error> for CmdError {
+    fn from(e: pf_core::Error) -> Self {
+        Self::new(e.kind(), e.to_string())
+    }
+}
+
+/// Run a blocking closure on a worker thread and surface failures as
+/// [`CmdError`] (Tauri serializes the `Err` arm to the UI's `catch`).
+async fn blocking<T, F>(f: F) -> Result<T, CmdError>
 where
     T: Send + 'static,
-    F: FnOnce() -> Result<T, String> + Send + 'static,
+    F: FnOnce() -> Result<T, CmdError> + Send + 'static,
 {
-    spawn_blocking(f).await.map_err(|e| e.to_string())?
+    spawn_blocking(f)
+        .await
+        .map_err(|e| CmdError::new("internal", e.to_string()))?
 }
 
 // ---------------------------------------------------------------------------
@@ -44,16 +76,12 @@ pub struct AuthStatus {
 }
 
 #[tauri::command]
-pub async fn auth_status() -> Result<AuthStatus, String> {
+pub async fn auth_status() -> Result<AuthStatus, CmdError> {
     blocking(|| {
-        let linked = auth::is_linked().map_err(|e| e.to_string())?;
+        let linked = auth::is_linked()?;
         // Only surface a cached profile while actually linked; a stale profile
         // without a token must not read as signed in.
-        let user = if linked {
-            auth::cached_user().map_err(|e| e.to_string())?
-        } else {
-            None
-        };
+        let user = if linked { auth::cached_user()? } else { None };
         Ok(AuthStatus { linked, user })
     })
     .await
@@ -85,13 +113,8 @@ impl From<DeviceFlow> for DeviceFlowDto {
 }
 
 #[tauri::command]
-pub async fn connect_begin() -> Result<DeviceFlowDto, String> {
-    blocking(|| {
-        auth::begin_device_flow(&ApiClient::from_env())
-            .map(DeviceFlowDto::from)
-            .map_err(|e| e.to_string())
-    })
-    .await
+pub async fn connect_begin() -> Result<DeviceFlowDto, CmdError> {
+    blocking(|| Ok(auth::begin_device_flow(&ApiClient::from_env()).map(DeviceFlowDto::from)?)).await
 }
 
 /// Tagged result of one poll, serialized as `{ "status": "...", ... }`.
@@ -118,41 +141,80 @@ impl From<FlowOutcome> for PollDto {
 }
 
 #[tauri::command]
-pub async fn connect_poll(device_code: String) -> Result<PollDto, String> {
+pub async fn connect_poll(device_code: String) -> Result<PollDto, CmdError> {
     blocking(move || {
-        auth::poll_device_flow(&ApiClient::from_env(), &device_code)
-            .map(PollDto::from)
-            .map_err(|e| e.to_string())
+        Ok(auth::poll_device_flow(&ApiClient::from_env(), &device_code).map(PollDto::from)?)
     })
     .await
 }
 
 #[tauri::command]
-pub async fn sign_out() -> Result<(), String> {
-    blocking(|| auth::sign_out().map_err(|e| e.to_string())).await
+pub async fn sign_out() -> Result<(), CmdError> {
+    blocking(|| Ok(auth::sign_out()?)).await
 }
 
 // ---------------------------------------------------------------------------
-// Downloads (M2 iRacing · M3 multi-sim)
+// Settings (M4)
 // ---------------------------------------------------------------------------
 
-/// Turn the UI's `{ "<sim id>": "<path>" }` override map into the typed,
-/// blank-filtered form `pf_core` expects.
-fn parse_overrides(overrides: Option<HashMap<String, String>>) -> HashMap<Sim, PathBuf> {
-    overrides
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|(id, path)| {
-            let path = path.trim();
-            match Sim::from_id(&id) {
-                Some(sim) if !path.is_empty() => Some((sim, PathBuf::from(path))),
-                _ => None,
-            }
-        })
-        .collect()
+/// The persisted settings, straight from disk. [`Settings`] serializes
+/// camelCase (`simFolders`, `conflictPolicy`) — mirrored in `lib/settings.ts`.
+#[tauri::command]
+pub async fn get_settings() -> Result<Settings, CmdError> {
+    blocking(|| Ok(Settings::load_default())).await
 }
 
-/// One sim's setups folder + whether it was found, for the UI's folder list.
+/// Persist the whole settings object (the UI auto-saves on each change).
+#[tauri::command]
+pub async fn save_settings(settings: Settings) -> Result<(), CmdError> {
+    blocking(move || Ok(settings.save_default()?)).await
+}
+
+/// Whether the app is registered to launch at startup (Windows Run key).
+#[tauri::command]
+pub fn get_autostart(app: tauri::AppHandle) -> Result<bool, CmdError> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|e| CmdError::new("autostart", e.to_string()))
+}
+
+/// Register/unregister launch-at-startup. Registered runs pass `--hidden` so a
+/// login launch goes straight to the tray without flashing the window.
+#[tauri::command]
+pub fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), CmdError> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autolaunch = app.autolaunch();
+    let result = if enabled {
+        autolaunch.enable()
+    } else {
+        autolaunch.disable()
+    };
+    log::info!("autostart set to {enabled}");
+    result.map_err(|e| CmdError::new("autostart", e.to_string()))
+}
+
+/// Reveal the app's log folder in Explorer (Settings → "Open logs folder"),
+/// so a support request can start with "send me the log file".
+#[tauri::command]
+pub fn open_logs_dir(app: tauri::AppHandle) -> Result<(), CmdError> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|e| CmdError::new("io", e.to_string()))?;
+    // A fresh install may not have logged yet; an empty folder beats an error.
+    std::fs::create_dir_all(&dir).map_err(|e| CmdError::new("io", e.to_string()))?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| CmdError::new("io", e.to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// Downloads (M2 iRacing · M3 multi-sim · M4 conflict policy)
+// ---------------------------------------------------------------------------
+
+/// One sim's setups folder + whether it was found, for the Settings folder list.
 #[derive(Serialize)]
 pub struct SimFolderDto {
     pub id: String,
@@ -162,18 +224,17 @@ pub struct SimFolderDto {
     pub overridden: bool,
 }
 
-/// Detect every sim's setups folder, applying any per-sim Settings overrides, so
-/// the UI can show what's installed and where setups will land.
+/// Detect every sim's setups folder, applying the persisted per-sim overrides,
+/// so the UI can show what's installed and where setups will land.
 #[tauri::command]
-pub async fn detect_sims(
-    overrides: Option<HashMap<String, String>>,
-) -> Result<Vec<SimFolderDto>, String> {
+pub async fn detect_sims() -> Result<Vec<SimFolderDto>, CmdError> {
     blocking(move || {
-        let overrides = parse_overrides(overrides);
+        let settings = Settings::load_default();
         Ok(Sim::ALL
             .into_iter()
             .map(|sim| {
-                let status = pf_core::paths::sim_folder_status(sim, overrides.get(&sim).cloned());
+                let status =
+                    pf_core::paths::sim_folder_status(sim, settings.sim_folders.get(&sim).cloned());
                 SimFolderDto {
                     id: sim.id().to_string(),
                     name: sim.display_name().to_string(),
@@ -192,7 +253,13 @@ pub async fn detect_sims(
 #[derive(Serialize, Clone)]
 pub struct InstalledSetupDto {
     pub path: String,
+    /// How the file landed: `installed` | `replaced` | `kept_both` |
+    /// `already_installed`. Words the toast.
+    pub action: InstallAction,
     pub sim: String,
+    /// Stable sim id ("iracing" | "acc" | "lmu") for UI logic (e.g. the ACC
+    /// missing-track heads-up); `sim` above is the display name.
+    pub sim_id: String,
     pub car: String,
     pub track: Option<String>,
     pub name: Option<String>,
@@ -202,7 +269,9 @@ impl From<download::InstalledSetup> for InstalledSetupDto {
     fn from(s: download::InstalledSetup) -> Self {
         Self {
             path: s.path.display().to_string(),
+            action: s.action,
             sim: s.sim.display_name().to_string(),
+            sim_id: s.sim.id().to_string(),
             car: s.car,
             track: s.track,
             name: s.name,
@@ -210,25 +279,62 @@ impl From<download::InstalledSetup> for InstalledSetupDto {
     }
 }
 
-/// Download and install a setup from a pasted parcferme.cc URL (or bare UUID).
-/// `overrides` maps each sim id to a folder override (blank/unknown ignored).
+impl InstalledSetupDto {
+    /// `(title, body)` for the native equip notification. Keeps the wording in
+    /// one place so the tray toast and any future UI copy agree.
+    pub fn toast(&self) -> (String, String) {
+        let what = self
+            .name
+            .clone()
+            .or_else(|| {
+                std::path::Path::new(&self.path)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().into_owned())
+            })
+            .unwrap_or_else(|| "Setup".to_string());
+        let mut place = vec![self.sim.clone()];
+        if !self.car.is_empty() {
+            place.push(self.car.clone());
+        }
+        if let Some(track) = &self.track {
+            place.push(track.clone());
+        }
+        let place = place.join(" · ");
+        match self.action {
+            InstallAction::AlreadyInstalled => (
+                "Already in your garage ✓".to_string(),
+                format!("“{what}” is already installed — {place}."),
+            ),
+            InstallAction::KeptBoth => (
+                "Equipped ✓ (kept your existing file)".to_string(),
+                format!("“{what}” → {place}"),
+            ),
+            InstallAction::Installed | InstallAction::Replaced => {
+                ("Equipped ✓".to_string(), format!("“{what}” → {place}"))
+            }
+        }
+    }
+}
+
+/// Download and install a setup from a pasted parcferme.cc URL (or bare UUID),
+/// using the persisted Settings (folder overrides + conflict policy).
 #[tauri::command]
-pub async fn download_setup(
-    input: String,
-    overrides: Option<HashMap<String, String>>,
-) -> Result<InstalledSetupDto, String> {
+pub async fn download_setup(input: String) -> Result<InstalledSetupDto, CmdError> {
     blocking(move || {
-        let uuid = download::extract_setup_uuid(&input)
-            .ok_or_else(|| "That doesn't look like a Parc Fermé setup link.".to_string())?;
-        download::download_setup(&uuid, &parse_overrides(overrides))
-            .map(InstalledSetupDto::from)
-            .map_err(|e| e.to_string())
+        let uuid = download::extract_setup_uuid(&input).ok_or_else(|| {
+            CmdError::new(
+                "invalid_link",
+                "That doesn't look like a Parc Fermé setup link.",
+            )
+        })?;
+        let settings = Settings::load_default();
+        Ok(download::download_setup(&uuid, &settings).map(InstalledSetupDto::from)?)
     })
     .await
 }
 
 // ---------------------------------------------------------------------------
-// Equip deep link (M3)
+// Equip deep link (M3 · M4 persisted settings + typed errors)
 // ---------------------------------------------------------------------------
 
 /// Outcome of an equip deep link, emitted to the frontend as the `equip-result`
@@ -238,20 +344,23 @@ pub async fn download_setup(
 pub enum EquipOutcome {
     /// The setup was fetched and written into its sim folder.
     Installed(InstalledSetupDto),
-    /// Parsing the link or downloading failed; `message` is user-facing.
-    Error { message: String },
+    /// Parsing the link or downloading failed; `message` is user-facing and
+    /// `kind` picks the recovery hint (see `lib/errors.ts`).
+    Error { kind: String, message: String },
 }
 
 /// Run a `parcferme://equip?…` deep link to completion (parse + download).
 ///
 /// Blocking — the deep-link handler in `lib.rs` calls this on a worker thread.
 /// Never panics; any failure (bad link, not linked, no access, network) becomes
-/// [`EquipOutcome::Error`]. Folder overrides aren't available on this path yet
-/// (persisted Settings are M4), so detection-only folders are used.
+/// [`EquipOutcome::Error`]. Reads the same persisted Settings as a manual pull,
+/// so folder overrides and the conflict policy apply to equips too.
 pub fn run_equip(url: &str) -> EquipOutcome {
-    match download::install_from_equip_link(url, &HashMap::new()) {
+    let settings = Settings::load_default();
+    match download::install_from_equip_link(url, &settings) {
         Ok(s) => EquipOutcome::Installed(s.into()),
         Err(e) => EquipOutcome::Error {
+            kind: e.kind().to_string(),
             message: e.to_string(),
         },
     }

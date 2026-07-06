@@ -16,7 +16,7 @@ use crate::{Error, Result};
 /// display profile so "Signed in as @user" (name + avatar) survives a restart
 /// without a network round-trip. The profile is not a secret, but co-locating
 /// it with the token keeps a single store and a single `sign_out` to clear.
-const KEYCHAIN_SERVICE: &str = "cc.parcferme.desktop";
+const KEYCHAIN_SERVICE: &str = crate::APP_ID;
 const KEYCHAIN_ACCOUNT: &str = "device-token";
 const KEYCHAIN_USER_ACCOUNT: &str = "device-user";
 
@@ -81,6 +81,7 @@ pub fn poll_device_flow(client: &ApiClient, device_code: &str) -> Result<FlowOut
     match client.poll_device_token(device_code)? {
         TokenPoll::Granted(token) => {
             store_token(&token.access_token)?;
+            log::info!("device linked and token stored in the OS keychain");
             // Cache the profile so the linked state can render after a restart
             // (auth_status reads it back). Best-effort: a cache write failure
             // must not fail the link — the token is what makes us signed in.
@@ -143,6 +144,7 @@ pub fn store_user(user: &DeviceUser) -> Result<()> {
 pub fn sign_out() -> Result<()> {
     delete_entry(entry()?)?;
     delete_entry(user_entry()?)?;
+    log::info!("signed out — token and cached profile cleared");
     Ok(())
 }
 

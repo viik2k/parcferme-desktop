@@ -4,10 +4,14 @@ A lightweight Windows **tray client** that turns clicking **Equip** on
 [parcferme.cc](https://parcferme.cc) into a setup file landing in the user's
 iRacing folder. Built on **Tauri 2** (Rust core + web UI).
 
-> Status: **M1 — Device auth (desktop side).** Tray app boots with a tray icon;
-> `pf_core` runs the OAuth 2.0 device-authorization grant and stores the device
-> token in Windows Credential Manager. The matching server endpoints are
-> specified in [`docs/SERVER_CONTRACT.md`](docs/SERVER_CONTRACT.md).
+> Status: **M4 — Hardening + UX polish.** Device auth (M1), multi-sim manual
+> pulls (M2), and the `parcferme://equip` deep link (M3) all work end to end;
+> M4 adds persisted Settings (per-sim folder overrides + conflict policy used
+> by *both* download paths), typed error states with recovery hints, the full
+> tray menu, native equip toasts, launch-at-startup, and structured file
+> logging. Server endpoints are specified in
+> [`docs/SERVER_CONTRACT.md`](docs/SERVER_CONTRACT.md); the web app's Equip
+> button emitting the deep link is the one remaining M3 piece.
 
 ## Architecture
 
@@ -22,8 +26,9 @@ parcferme-desktop/
 │        ├── auth             (device-token grant, OS-keychain storage)   [M1]
 │        ├── api              (typed client for parcferme.cc endpoints)   [M2]
 │        ├── paths            (locate Documents\iRacing\setups\, …)       [M2]
-│        ├── download         (presigned-URL fetch → atomic write)        [M2]
-│        └── deeplink         (parse parcferme://equip?… payloads)        [M3]
+│        ├── download         (presigned fetch → atomic, conflict-aware write) [M2·M4]
+│        ├── deeplink         (parse parcferme://equip?… payloads)        [M3]
+│        └── settings         (persisted overrides + conflict policy)     [M4]
 ├── apps/
 │   └── pf_desk/              ← Tauri shell: tray, window, settings, toasts
 │        ├── src/             (React + TS + Tailwind + Vite UI)

@@ -45,8 +45,31 @@ impl Sim {
     }
 
     /// Parse the short id back into a [`Sim`]; `None` for an unknown id.
+    /// Tolerant of casing and surrounding whitespace — this also parses the
+    /// server's `sim` tag, and a cosmetic server-side change ("ACC", "iRacing")
+    /// must not reroute files.
     pub fn from_id(id: &str) -> Option<Sim> {
+        let id = id.trim().to_ascii_lowercase();
         Sim::ALL.into_iter().find(|s| s.id() == id)
+    }
+
+    /// Infer the sim from a setup file's extension. Each sim has a distinct
+    /// format — `.sto` iRacing, `.json` ACC, `.svm` LMU (rFactor 2 heritage) —
+    /// so the extension is ground truth for *which game can load the file*,
+    /// independent of how the setup is tagged server-side.
+    pub fn from_extension(ext: &str) -> Option<Sim> {
+        match ext.trim_start_matches('.').to_ascii_lowercase().as_str() {
+            "sto" => Some(Sim::IRacing),
+            "json" => Some(Sim::Acc),
+            "svm" => Some(Sim::Lmu),
+            _ => None,
+        }
+    }
+
+    /// [`Sim::from_extension`] applied to a full filename.
+    pub fn from_filename(filename: &str) -> Option<Sim> {
+        let ext = Path::new(filename).extension()?.to_str()?;
+        Sim::from_extension(ext)
     }
 
     /// Human-facing name for toasts and the folder list.
@@ -95,6 +118,21 @@ mod tests {
             assert_eq!(Sim::from_id(sim.id()), Some(sim));
         }
         assert_eq!(Sim::from_id("nope"), None);
+        // Tolerant of server-side cosmetic variations.
+        assert_eq!(Sim::from_id(" ACC "), Some(Sim::Acc));
+        assert_eq!(Sim::from_id("iRacing"), Some(Sim::IRacing));
+    }
+
+    #[test]
+    fn extension_maps_to_the_sim_that_loads_it() {
+        assert_eq!(Sim::from_extension("sto"), Some(Sim::IRacing));
+        assert_eq!(Sim::from_extension(".JSON"), Some(Sim::Acc));
+        assert_eq!(Sim::from_extension("svm"), Some(Sim::Lmu));
+        assert_eq!(Sim::from_extension("zip"), None);
+
+        assert_eq!(Sim::from_filename("quali_spa.json"), Some(Sim::Acc));
+        assert_eq!(Sim::from_filename("baseline.sto"), Some(Sim::IRacing));
+        assert_eq!(Sim::from_filename("no_extension"), None);
     }
 
     #[test]

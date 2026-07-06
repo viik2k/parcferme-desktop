@@ -106,7 +106,26 @@ for the non-browser caller.
 }
 ```
 
-The client (`pf_core`) routes the file by `sim`:
+#### How the client picks the destination sim (updated 2026-07-02)
+
+A live ACC download arrived without a usable `sim` tag and was routed to
+iRacing, so the client no longer trusts the tag blindly. Resolution order
+(`DownloadInfo::resolved_sim`):
+
+1. **File extension is ground truth** — `.sto` → iracing, `.json` → acc,
+   `.svm` → lmu. Each format loads in exactly one supported sim, so a
+   recognized extension **wins over a contradicting `sim` tag** (logged as a
+   warning).
+2. The `sim` tag decides only when the extension is unrecognized. Parsing is
+   tolerant (case/whitespace).
+3. Neither usable → iracing (the M2 single-sim behavior).
+
+The server **should still send a correct `sim` tag** — it is the only signal
+for any future sim whose file extension isn't unique — and **must** send
+`track` for ACC setups, which the client cannot infer (without it the file
+lands in `<car>\` and ACC won't list it in-game; the app warns the user).
+
+The client (`pf_core`) routes the file by the resolved sim:
 
 | sim       | folder under Documents                                  | layout            |
 | :-------- | :------------------------------------------------------ | :---------------- |

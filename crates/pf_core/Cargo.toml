@@ -11,6 +11,7 @@ repository.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+log = { workspace = true }
 # Blocking HTTP with rustls — no async runtime, keeps pf_core UI/runtime-agnostic
 # and avoids OpenSSL (a Windows packaging win).
 ureq = { version = "2", features = ["json"] }

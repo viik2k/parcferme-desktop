@@ -24,6 +24,9 @@ pf_core = { path = "crates/pf_core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# Logging facade only — pf_core emits `log` records; pf_desk owns the sink
+# (tauri-plugin-log → file), keeping the core runtime-agnostic (M4).
+log = "0.4"
 
 # Slim release binaries — this is a tray utility that runs alongside iRacing.
 [profile.release]

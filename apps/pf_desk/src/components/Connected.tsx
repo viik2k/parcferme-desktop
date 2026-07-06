@@ -1,11 +1,6 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { signOut, type DeviceUser } from "../lib/auth";
-
-interface Pong {
-  message: string;
-  core_version: string;
-}
+import { toCmdError } from "../lib/errors";
 
 export function Connected({
   user,
@@ -15,13 +10,16 @@ export function Connected({
   onSignedOut: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [pong, setPong] = useState<Pong | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSignOut() {
     setBusy(true);
+    setError(null);
     try {
       await signOut();
       onSignedOut();
+    } catch (e) {
+      setError(toCmdError(e).message);
     } finally {
       setBusy(false);
     }
@@ -49,22 +47,19 @@ export function Connected({
         You can close this window — it stays in your tray, ready to equip setups.
       </p>
 
-      <div className="mt-5 flex items-center gap-2">
-        <button
-          onClick={() => void handleSignOut()}
-          disabled={busy}
-          className="flex-1 rounded-lg bg-card px-4 py-2 text-sm font-medium text-foreground ring-1 ring-border transition hover:bg-border/40 disabled:opacity-50"
-        >
-          Sign out
-        </button>
-        <button
-          onClick={async () => setPong(await invoke<Pong>("ping", { message: "ok" }))}
-          className="rounded-lg px-3 py-2 text-xs text-muted ring-1 ring-border transition hover:text-foreground"
-          title="Core health check"
-        >
-          {pong ? `core ${pong.core_version}` : "Core check"}
-        </button>
-      </div>
+      <button
+        onClick={() => void handleSignOut()}
+        disabled={busy}
+        className="mt-5 w-full rounded-lg bg-card px-4 py-2 text-sm font-medium text-foreground ring-1 ring-border transition hover:bg-border/40 disabled:opacity-50"
+      >
+        Sign out
+      </button>
+
+      {error && (
+        <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive ring-1 ring-destructive/30">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

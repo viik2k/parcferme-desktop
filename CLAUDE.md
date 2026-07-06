@@ -29,23 +29,37 @@ All product logic lives in `pf_core`, a plain Rust library with no UI, no async 
 
 ```
 crates/pf_core/src/
-├── lib.rs        # public API surface
+├── lib.rs        # public API surface + APP_ID
 ├── auth.rs       # OAuth 2.0 device-authorization grant + Windows Credential Manager storage
 ├── api.rs        # typed blocking HTTP client for parcferme.cc (ureq, no async)
-├── paths.rs      # locate Documents\iRacing\setups\
-├── download.rs   # presigned-URL fetch → atomic write to disk
+├── paths.rs      # locate Documents\iRacing\setups\ (and ACC/LMU)
+├── download.rs   # presigned-URL fetch → atomic, conflict-policy-aware write
 ├── deeplink.rs   # parse parcferme:// URL schemes
-└── error.rs      # PfError enum + Result<T> alias
+├── settings.rs   # persisted settings: per-sim folder overrides + conflict policy
+├── sim.rs        # supported sims: folder roots + per-sim layout
+└── error.rs      # Error enum (+ kind() for the UI hint map) + Result<T> alias
 
 apps/pf_desk/src-tauri/src/
 ├── lib.rs        # Tauri app setup: tray, window, command registration
 └── commands.rs   # Tauri #[command] fns — bridges React IPC to pf_core; runs blocking work on spawn_blocking
 
 apps/pf_desk/src/
-├── App.tsx       # root component: auth state machine, panel switching
-├── components/   # ConnectPanel, Connected, DownloadPanel
-└── lib/          # thin TS wrappers over Tauri invoke() calls (auth.ts, download.ts)
+├── App.tsx       # root component: auth state machine, home/settings views, equip banner
+├── components/   # ConnectPanel, Connected, DownloadPanel, SettingsPanel
+└── lib/          # thin TS wrappers over Tauri invoke() (auth, download, settings, errors)
 ```
+
+### IPC error contract (M4)
+
+Commands reject with `{ kind, message }` (`commands::CmdError`); `kind` comes from
+`pf_core::Error::kind()` and drives the per-kind recovery hints in
+`apps/pf_desk/src/lib/errors.ts`. Adding an error variant means updating both sides.
+
+### App data locations (Windows)
+
+- Settings: `%APPDATA%\cc.parcferme.desktop\settings.json` (written by `pf_core::settings`)
+- Logs: `%LOCALAPPDATA%\cc.parcferme.desktop\logs\pf-desk.log` (tauri-plugin-log; never log tokens or presigned URLs)
+- Device token: Windows Credential Manager, service `cc.parcferme.desktop`
 
 ### Key constraints
 

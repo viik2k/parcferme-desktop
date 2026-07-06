@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-shell";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   connectBegin,
   connectPoll,
   type DeviceFlow,
   type DeviceUser,
 } from "../lib/auth";
+import { errorHint, toCmdError } from "../lib/errors";
 
 type Phase = "idle" | "starting" | "waiting" | "error";
+
+/** Message + recovery hint on one line (the panel has a single error slot). */
+function describe(e: unknown): string {
+  const err = toCmdError(e);
+  const hint = errorHint(err.kind);
+  return hint ? `${err.message} — ${hint}` : err.message;
+}
 
 export function ConnectPanel({
   onLinked,
@@ -58,7 +66,7 @@ export function ConnectPanel({
         }
       } catch (e) {
         setPhase("error");
-        setMessage(String(e));
+        setMessage(describe(e));
       }
     }, intervalSecs * 1000);
   }
@@ -74,14 +82,14 @@ export function ConnectPanel({
       schedulePoll(f, f.interval_secs);
     } catch (e) {
       setPhase("error");
-      setMessage(String(e));
+      setMessage(describe(e));
     }
   }
 
   async function openApproval(f: DeviceFlow) {
     const url = f.verification_uri_complete ?? f.verification_uri;
     try {
-      await open(url);
+      await openUrl(url);
     } catch {
       // Non-fatal: the user can open the URL shown below manually.
     }

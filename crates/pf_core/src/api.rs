@@ -75,10 +75,13 @@ pub struct DownloadInfo {
     pub url: String,
     /// The setup file's name, e.g. `baseline_spa.sto`. Sanitized before use.
     pub filename: String,
-    /// Which sim this setup is for — picks the destination folder + layout.
-    /// Absent → iRacing, so a single-sim M2 server keeps working unchanged.
+    /// Which sim the server *tagged* this setup for (`"iracing"` | `"acc"` |
+    /// `"lmu"`). Kept raw and optional so a missing, novel, or misspelled tag
+    /// can never fail the download — don't read this directly, use
+    /// [`DownloadInfo::resolved_sim`], which reconciles the tag with the file
+    /// format.
     #[serde(default)]
-    pub sim: Sim,
+    pub sim: Option<String>,
     /// Car folder name — becomes the `<car>\` subfolder. Should be the sim's
     /// internal folder id (e.g. `ferrari_488_gt3_evo`), not a display name, or
     /// the sim may not list the setup. See the SERVER_CONTRACT caveat.
@@ -91,6 +94,50 @@ pub struct DownloadInfo {
     /// Setup's display name, for the success toast.
     #[serde(default)]
     pub name: Option<String>,
+}
+
+impl DownloadInfo {
+    /// Decide which sim this file actually belongs to.
+    ///
+    /// The file extension is ground truth — `.sto`/`.json`/`.svm` each load in
+    /// exactly one supported sim — so it wins over a contradicting server tag
+    /// (with a warning; a `.json` in `iRacing\setups\` helps nobody). The tag
+    /// decides only when the extension is unrecognized. Neither present →
+    /// iRacing, matching the single-sim M2 server.
+    pub fn resolved_sim(&self) -> Sim {
+        let tagged = self.sim.as_deref().and_then(Sim::from_id);
+        let by_format = Sim::from_filename(&self.filename);
+        match (tagged, by_format) {
+            (Some(tag), Some(fmt)) if tag != fmt => {
+                log::warn!(
+                    "server tagged setup as {:?} but {:?} is a {} file — routing by file format",
+                    self.sim.as_deref().unwrap_or_default(),
+                    self.filename,
+                    fmt.id()
+                );
+                fmt
+            }
+            (Some(tag), _) => tag,
+            (None, Some(fmt)) => {
+                if self.sim.is_some() {
+                    log::warn!(
+                        "unrecognized sim tag {:?} — routing {:?} by file format ({})",
+                        self.sim.as_deref().unwrap_or_default(),
+                        self.filename,
+                        fmt.id()
+                    );
+                }
+                fmt
+            }
+            (None, None) => {
+                log::warn!(
+                    "no usable sim tag and unrecognized extension on {:?} — defaulting to iRacing",
+                    self.filename
+                );
+                Sim::IRacing
+            }
+        }
+    }
 }
 
 /// Outcome of one poll of the device-token endpoint.
@@ -130,9 +177,7 @@ impl ApiClient {
     /// Build a client from the environment (`PARCFERME_API_URL`), defaulting to
     /// production.
     pub fn from_env() -> Self {
-        let base =
-            std::env::var("PARCFERME_API_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
-        Self::new(base)
+        Self::new(base_url_from_env())
     }
 
     fn url(&self, path: &str) -> String {
@@ -206,13 +251,11 @@ impl ApiClient {
             .call();
         match result {
             Ok(resp) => read_json(resp),
-            Err(ureq::Error::Status(401, _)) => Err(Error::Api(
-                "this device is no longer authorized — sign out and reconnect".into(),
-            )),
-            Err(ureq::Error::Status(403, _)) => {
-                Err(Error::Api("you don't have access to this setup".into()))
-            }
-            Err(ureq::Error::Status(404, _)) => Err(Error::Api("setup not found".into())),
+            // Typed so the UI can hint the right recovery per unhappy path (M4):
+            // 401 → reconnect, 403 → ask for access, 404 → stale link.
+            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(ureq::Error::Status(403, _)) => Err(Error::AccessDenied),
+            Err(ureq::Error::Status(404, _)) => Err(Error::SetupNotFound),
             Err(ureq::Error::Status(code, resp)) => {
                 let body: ErrorBody = resp.into_json().unwrap_or_default();
                 let detail = if body.error.is_empty() {
@@ -237,6 +280,15 @@ impl ApiClient {
             format!("{}/{url}", self.base_url)
         }
     }
+}
+
+/// The web origin the client is pointed at (`PARCFERME_API_URL` or the
+/// production default), trailing slash stripped. Also used for user-facing
+/// links (e.g. the tray's "Browse setups"), so it must be the *web* origin,
+/// not a bare API host.
+pub fn base_url_from_env() -> String {
+    let base = std::env::var("PARCFERME_API_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
+    normalize_base(base)
 }
 
 /// Map an RFC 8628 token-endpoint error code to a [`TokenPoll`].
@@ -308,24 +360,50 @@ mod tests {
         assert!(matches!(map_token_error("weird"), TokenPoll::Expired));
     }
 
+    fn info(json: &str) -> DownloadInfo {
+        serde_json::from_str(json).unwrap()
+    }
+
     #[test]
-    fn download_info_defaults_to_iracing_and_reads_sim_track() {
-        // Single-sim M2 server: no `sim`/`track` → iRacing, no track.
-        let legacy: DownloadInfo = serde_json::from_str(
+    fn download_info_reads_sim_and_track() {
+        // Single-sim M2 server: no `sim`/`track` → iRacing (via extension).
+        let legacy = info(
             r#"{ "url": "https://r2/x", "filename": "baseline.sto", "car": "ferrari296gt3" }"#,
-        )
-        .unwrap();
-        assert_eq!(legacy.sim, Sim::IRacing);
+        );
+        assert_eq!(legacy.resolved_sim(), Sim::IRacing);
         assert_eq!(legacy.track, None);
 
         // Multi-sim server: explicit ACC setup with a track.
-        let acc: DownloadInfo = serde_json::from_str(
+        let acc = info(
             r#"{ "url": "https://r2/y", "filename": "quali.json",
                  "sim": "acc", "car": "ferrari_488_gt3_evo", "track": "spa" }"#,
-        )
-        .unwrap();
-        assert_eq!(acc.sim, Sim::Acc);
+        );
+        assert_eq!(acc.resolved_sim(), Sim::Acc);
         assert_eq!(acc.track.as_deref(), Some("spa"));
+    }
+
+    #[test]
+    fn resolved_sim_routes_by_file_format_when_tag_is_wrong_or_missing() {
+        // The live bug (2026-07-02): an ACC setup with no usable tag was routed
+        // to iRacing. The `.json` extension alone must land it in ACC.
+        let untagged = info(r#"{ "url": "u", "filename": "quali_spa.json", "car": "f488" }"#);
+        assert_eq!(untagged.resolved_sim(), Sim::Acc);
+
+        // A tag contradicting the file format loses — a .json can't load in iRacing.
+        let mistagged =
+            info(r#"{ "url": "u", "filename": "quali.json", "sim": "iracing", "car": "c" }"#);
+        assert_eq!(mistagged.resolved_sim(), Sim::Acc);
+
+        // Junk / cosmetic tags: unknown values fall back to the extension,
+        // case-variant known values still parse.
+        let junk = info(r#"{ "url": "u", "filename": "race.svm", "sim": "lemans", "car": "c" }"#);
+        assert_eq!(junk.resolved_sim(), Sim::Lmu);
+        let cased = info(r#"{ "url": "u", "filename": "x.bin", "sim": "ACC", "car": "c" }"#);
+        assert_eq!(cased.resolved_sim(), Sim::Acc);
+
+        // Nothing to go on at all → iRacing, matching the M2 single-sim server.
+        let bare = info(r#"{ "url": "u", "filename": "mystery.bin", "car": "c" }"#);
+        assert_eq!(bare.resolved_sim(), Sim::IRacing);
     }
 
     #[test]

@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main window. Kept minimal per Build Plan §6 — broaden only as milestones require (filesystem for M2, deep-link for M3).",
+  "description": "Capabilities for the main window. Kept minimal per Build Plan §6 — broaden only as milestones require (filesystem for M2, deep-link for M3, folder-picker dialog for M4 Settings).",
   "local": true,
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "shell:allow-open",
-    "deep-link:default"
+    "opener:default",
+    "deep-link:default",
+    "dialog:allow-open"
   ]
 }
