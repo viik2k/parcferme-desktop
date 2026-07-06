@@ -173,6 +173,61 @@ event the UI shows as a toast. Not-signed-in / no-access / network failures come
 back as a clear error in the same toast. Cold start (app launched by the link)
 and warm start (already running) are both handled.
 
+## 7. M5 push endpoint — upload a setup from the desktop
+
+The reverse of §5: the desktop pushes a local setup file and the server creates
+a setup owned by the device token's linked user.
+
+### `POST /api/device/setups/upload`
+
+- `Authorization: Bearer <device token>` — same resolver as §3.
+- `Content-Type: application/octet-stream`, body = the raw setup file bytes
+  (client refuses files over 2 MB; enforce a server-side limit too).
+- Metadata rides in the **query string** (no multipart):
+
+| param      | required | meaning                                                      |
+| :--------- | :------- | :----------------------------------------------------------- |
+| `filename` | yes      | file name as on disk, e.g. `quali_spa.json`                  |
+| `sim`      | yes      | `"iracing"` \| `"acc"` \| `"lmu"`                             |
+| `car`      | yes      | the sim's **internal car folder id** as found on disk         |
+| `track`    | ACC      | internal track folder id (from the `<car>\<track>\` layout)  |
+| `name`     | no       | display name typed by the user                               |
+
+`car`/`track` are the same internal folder ids §5 must *emit* — here the client
+*reads them off disk* (extension → sim; position under the sim's setups folder →
+car/track), so this is the reverse of the `cars.simRefId` mapping: resolve the
+folder id to the matching cars/tracks row where possible, and keep the raw value
+either way so nothing is lost when there's no match. The user can edit all
+fields before uploading, so treat them as untrusted input (validate/limit
+lengths, rate-limit with `checkRateLimit`).
+
+Response `200/201`:
+
+```jsonc
+{
+  "id": "<setup uuid>",                          // required
+  "url": "https://parcferme.cc/setups/<uuid>"    // optional; client synthesizes it from `id` if absent
+}
+```
+
+Errors: `401` bad/revoked token · `403` uploads not permitted for this user ·
+`413` too large · `422` invalid metadata. The client maps 401 to its reconnect
+hint and surfaces the rest verbatim, so a JSON `{ "error": "…" }` body with a
+human-readable message is worth returning.
+
+## 8. Release download (website "Download the app" button)
+
+CI attaches **stable-named** installers to every `v*` GitHub Release alongside
+the versioned ones. The website's download button should link:
+
+```
+https://github.com/omlabs/parcferme-desktop/releases/latest/download/ParcFerme-Setup.msi
+```
+
+(`ParcFerme-Setup.exe` for the NSIS build.) `releases/latest/download/…` always
+resolves to the newest **published** release — drafts stay invisible, so
+publishing the draft release is the whole "ship" step.
+
 ## Client knobs
 
 - Base URL: `PARCFERME_API_URL` env (defaults to `https://parcferme.cc`).

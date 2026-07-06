@@ -334,6 +334,61 @@ pub async fn download_setup(input: String) -> Result<InstalledSetupDto, CmdError
 }
 
 // ---------------------------------------------------------------------------
+// Push a setup (M5)
+// ---------------------------------------------------------------------------
+
+/// Inspect a picked setup file: infer sim from the extension and car/track
+/// from its position under that sim's setups folder (override-aware). Pure
+/// inference — nothing leaves the machine. Pre-fills the upload form.
+#[tauri::command]
+pub async fn identify_setup(path: String) -> Result<pf_core::upload::SetupIdentity, CmdError> {
+    blocking(move || {
+        let settings = Settings::load_default();
+        Ok(pf_core::upload::identify(
+            std::path::Path::new(&path),
+            &settings,
+        ))
+    })
+    .await
+}
+
+/// The uploaded setup as shown in the success card: its id and page URL.
+#[derive(Serialize)]
+pub struct UploadedSetupDto {
+    pub id: String,
+    pub url: String,
+}
+
+/// Push a local setup file to parcferme.cc as the linked user. `sim` is the
+/// short id ("iracing" | "acc" | "lmu"); `car`/`track` are the sim's internal
+/// folder ids (pre-filled by [`identify_setup`], editable by the user).
+#[tauri::command]
+pub async fn upload_setup(
+    path: String,
+    sim: String,
+    car: String,
+    track: Option<String>,
+    name: Option<String>,
+) -> Result<UploadedSetupDto, CmdError> {
+    blocking(move || {
+        let sim = Sim::from_id(&sim)
+            .ok_or_else(|| CmdError::new("api", format!("unknown sim: {sim:?}")))?;
+        let result = pf_core::upload::upload_setup(
+            std::path::Path::new(&path),
+            sim,
+            car.trim(),
+            track.as_deref().map(str::trim).filter(|t| !t.is_empty()),
+            name.as_deref().map(str::trim).filter(|n| !n.is_empty()),
+        )?;
+        Ok(UploadedSetupDto {
+            id: result.id,
+            url: result.url,
+        })
+    })
+    .await
+}
+
+// ---------------------------------------------------------------------------
 // Equip deep link (M3 · M4 persisted settings + typed errors)
 // ---------------------------------------------------------------------------
 

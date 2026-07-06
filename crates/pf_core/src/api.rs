@@ -140,6 +140,36 @@ impl DownloadInfo {
     }
 }
 
+/// Metadata accompanying a pushed setup file (M5). `car`/`track` are the sim's
+/// internal folder ids exactly as found on the uploader's disk — the reverse of
+/// the §5 download mapping (SERVER_CONTRACT §7).
+#[derive(Debug, Clone)]
+pub struct UploadMeta<'a> {
+    pub filename: &'a str,
+    pub sim: Sim,
+    pub car: &'a str,
+    pub track: Option<&'a str>,
+    pub name: Option<&'a str>,
+}
+
+/// Successful upload: the new setup's public UUID and its page URL.
+#[derive(Debug, Clone, Serialize)]
+pub struct UploadResult {
+    pub id: String,
+    /// Absolute `https://…/setups/<id>` URL, synthesized from the client's
+    /// origin if the server omits or relativizes it.
+    pub url: String,
+}
+
+/// Wire shape of the upload response — `url` optional so a minimal server
+/// response (`{ "id": … }`) still succeeds.
+#[derive(Debug, Deserialize)]
+struct UploadResultWire {
+    id: String,
+    #[serde(default)]
+    url: Option<String>,
+}
+
 /// Outcome of one poll of the device-token endpoint.
 #[derive(Debug)]
 pub enum TokenPoll {
@@ -264,6 +294,60 @@ impl ApiClient {
                     format!(": {}", body.error)
                 };
                 Err(Error::Api(format!("download failed (HTTP {code}){detail}")))
+            }
+            Err(e) => Err(map_transport(e)),
+        }
+    }
+
+    /// Push one setup file (M5). Raw bytes in the body, metadata in the query
+    /// string — no multipart, so `ureq` needs no extra machinery. The server
+    /// stores the file and creates the setup as the token's linked user
+    /// (SERVER_CONTRACT §7).
+    pub fn upload_setup(
+        &self,
+        token: &str,
+        meta: &UploadMeta,
+        bytes: &[u8],
+    ) -> Result<UploadResult> {
+        let mut req = self
+            .agent
+            .post(&self.url("/api/device/setups/upload"))
+            .set("Authorization", &format!("Bearer {token}"))
+            .set("Content-Type", "application/octet-stream")
+            .query("filename", meta.filename)
+            .query("sim", meta.sim.id())
+            .query("car", meta.car);
+        if let Some(track) = meta.track {
+            req = req.query("track", track);
+        }
+        if let Some(name) = meta.name {
+            req = req.query("name", name);
+        }
+        match req.send_bytes(bytes) {
+            Ok(resp) => {
+                let wire: UploadResultWire = read_json(resp)?;
+                let url = match wire.url {
+                    Some(url) => self.absolutize(url),
+                    None => format!("{}/setups/{}", self.base_url, wire.id),
+                };
+                Ok(UploadResult { id: wire.id, url })
+            }
+            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(ureq::Error::Status(403, _)) => Err(Error::Api(
+                "the server refused this upload — your account may not be allowed to publish setups"
+                    .to_string(),
+            )),
+            Err(ureq::Error::Status(413, _)) => Err(Error::Api(
+                "the server rejected the file as too large".to_string(),
+            )),
+            Err(ureq::Error::Status(code, resp)) => {
+                let body: ErrorBody = resp.into_json().unwrap_or_default();
+                let detail = if body.error.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", body.error)
+                };
+                Err(Error::Api(format!("upload failed (HTTP {code}){detail}")))
             }
             Err(e) => Err(map_transport(e)),
         }

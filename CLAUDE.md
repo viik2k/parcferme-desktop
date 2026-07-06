@@ -34,6 +34,7 @@ crates/pf_core/src/
 ├── api.rs        # typed blocking HTTP client for parcferme.cc (ureq, no async)
 ├── paths.rs      # locate Documents\iRacing\setups\ (and ACC/LMU)
 ├── download.rs   # presigned-URL fetch → atomic, conflict-policy-aware write
+├── upload.rs     # identify a local setup (sim/car/track off its path) + push to the site
 ├── deeplink.rs   # parse parcferme:// URL schemes
 ├── settings.rs   # persisted settings: per-sim folder overrides + conflict policy
 ├── sim.rs        # supported sims: folder roots + per-sim layout

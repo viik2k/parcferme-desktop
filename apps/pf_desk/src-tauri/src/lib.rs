@@ -255,6 +255,8 @@ pub fn run() {
             commands::open_logs_dir,
             commands::detect_sims,
             commands::download_setup,
+            commands::identify_setup,
+            commands::upload_setup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the ParcFerme tray app")

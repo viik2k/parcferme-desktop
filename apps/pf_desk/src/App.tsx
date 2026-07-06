@@ -6,6 +6,7 @@ import { ConnectPanel } from "./components/ConnectPanel";
 import { Connected } from "./components/Connected";
 import { DownloadPanel } from "./components/DownloadPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { UploadPanel } from "./components/UploadPanel";
 import { authStatus, type DeviceUser } from "./lib/auth";
 import {
   actionLabel,
@@ -161,6 +162,7 @@ function App() {
               }}
             />
             <DownloadPanel onOpenSettings={() => setView("settings")} />
+            <UploadPanel />
           </div>
         ) : (
           <ConnectPanel

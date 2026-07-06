@@ -13,6 +13,7 @@ mod error;
 pub mod paths;
 pub mod settings;
 pub mod sim;
+pub mod upload;
 
 pub use error::{Error, Result};
 pub use sim::Sim;
