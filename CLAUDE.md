@@ -77,6 +77,13 @@ Commands reject with `{ kind, message }` (`commands::CmdError`); `kind` comes fr
 4. Add a `invoke()`-based wrapper in `apps/pf_desk/src/lib/`.
 5. Wire the UI in `apps/pf_desk/src/`.
 
+## Releasing
+
+`docs/RELEASE.md` is the release runbook: packaging (tag `v*` → CI drafts a
+GitHub Release → publish), auto-updater wiring, and the site's stable download
+URL. Version lives in four files (workspace Cargo.toml, tauri.conf.json, both
+package.jsons) — bump all or none.
+
 ## Server contract
 
 `docs/SERVER_CONTRACT.md` specifies the API the server must implement for each milestone. The desktop client is built against it — do not change client-side endpoint paths or payload shapes without updating that doc. The `PARCFERME_API_URL` env var is the only knob; the client id is always `pf-desktop`.

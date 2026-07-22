@@ -17,7 +17,7 @@ version = "0.2.0"
 edition = "2021"
 license = "MIT"
 authors = ["OMLabs"]
-repository = "https://github.com/omlabs/parcferme-desktop"
+repository = "https://github.com/viik2k/parcferme-desktop"
 
 [workspace.dependencies]
 pf_core = { path = "crates/pf_core" }

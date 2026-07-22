@@ -221,7 +221,7 @@ CI attaches **stable-named** installers to every `v*` GitHub Release alongside
 the versioned ones. The website's download button should link:
 
 ```
-https://github.com/omlabs/parcferme-desktop/releases/latest/download/ParcFerme-Setup.msi
+https://github.com/viik2k/parcferme-desktop/releases/latest/download/ParcFerme-Setup.msi
 ```
 
 (`ParcFerme-Setup.exe` for the NSIS build.) `releases/latest/download/…` always
