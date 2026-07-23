@@ -40,3 +40,7 @@ pf_core = { workspace = true }
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 # M4 Settings "Launch at startup" toggle (registry Run key on Windows).
 tauri-plugin-autostart = "2"
+# Auto-update (desktop-only): poll the signed latest.json on GitHub Releases,
+# download + apply the newer installer, then relaunch via the process plugin.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"

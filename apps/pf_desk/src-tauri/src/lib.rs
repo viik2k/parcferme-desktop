@@ -212,7 +212,12 @@ pub fn run() {
             .plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 Some(vec!["--hidden"]),
-            ));
+            ))
+            // Auto-update: the frontend calls check()/downloadAndInstall() against
+            // the signed latest.json endpoint (tauri.conf.json → plugins.updater);
+            // process::relaunch() restarts into the new build.
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
     }
 
     builder

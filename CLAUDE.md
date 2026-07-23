@@ -79,10 +79,14 @@ Commands reject with `{ kind, message }` (`commands::CmdError`); `kind` comes fr
 
 ## Releasing
 
-`docs/RELEASE.md` is the release runbook: packaging (tag `v*` → CI drafts a
-GitHub Release → publish), auto-updater wiring, and the site's stable download
-URL. Version lives in four files (workspace Cargo.toml, tauri.conf.json, both
-package.jsons) — bump all or none.
+`docs/RELEASE.md` is the release runbook: the merge→tag→build→publish pipeline,
+auto-updater wiring (signing key + `RELEASE_PAT` secrets), and the site's stable
+download URL. Each merge to `main` auto-bumps the **patch** version and pushes a
+`vX.Y.Z` tag (`.github/workflows/release-tag.yml`), which drives CI to build,
+sign, and draft a GitHub Release carrying `latest.json` for the in-app updater.
+Version lives in five places (workspace Cargo.toml, tauri.conf.json, both
+package.jsons, and the `pf_core`/`pf_desk` entries in Cargo.lock) — the bump job
+keeps them in sync; if you edit by hand, bump all or none.
 
 ## Server contract
 
