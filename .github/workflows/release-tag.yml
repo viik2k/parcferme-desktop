@@ -1,0 +1,84 @@
+name: Release tag
+
+# Every merge to main cuts the next patch release: bump the version across all
+# the files that carry it, commit, and push a vX.Y.Z tag. The tag push triggers
+# the build+draft-release job in ci.yml, whose signed installers + latest.json
+# feed the in-app auto-updater. See docs/RELEASE.md.
+on:
+  push:
+    branches: [main]
+
+# Serialize bumps so two quick merges can't race to the same version.
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    # Don't loop on the bump commit this job pushes back to main.
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # A PAT is required so the tag push starts ci.yml — pushes made with the
+          # default GITHUB_TOKEN do NOT trigger further workflow runs. Create a
+          # fine-grained PAT with contents:write and store it as RELEASE_PAT
+          # (docs/RELEASE.md). Falls back to GITHUB_TOKEN, which tags but won't
+          # kick the release build.
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Compute next patch version (numeric order)
+        id: version
+        shell: bash
+        run: |
+          git fetch --tags --force
+          # Highest existing vX.Y.Z by semver (numeric), not lexical, order.
+          latest=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1)
+          [ -z "$latest" ] && latest="v0.2.0"
+          base=${latest#v}
+          IFS='.' read -r major minor patch <<< "$base"
+          next="$major.$minor.$((patch + 1))"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "tag=v$next" >> "$GITHUB_OUTPUT"
+          echo "Next release: v$next (previous highest tag: $latest)"
+
+      - name: Bump version everywhere
+        shell: bash
+        run: |
+          next="${{ steps.version.outputs.next }}"
+          semver='[0-9]+\.[0-9]+\.[0-9]+'
+
+          # Workspace Cargo.toml: only the [workspace.package] version line.
+          sed -i -E "0,/^version = \"$semver\"/s//version = \"$next\"/" Cargo.toml
+          # tauri.conf.json (top-level "version").
+          sed -i -E "0,/(\"version\": \")$semver(\")/s//\1$next\2/" apps/pf_desk/src-tauri/tauri.conf.json
+          # Both package.json files.
+          sed -i -E "0,/(\"version\": \")$semver(\")/s//\1$next\2/" package.json
+          sed -i -E "0,/(\"version\": \")$semver(\")/s//\1$next\2/" apps/pf_desk/package.json
+          # Cargo.lock entries for the two workspace crates (keeps --locked green
+          # without a full cargo resolve in this job).
+          perl -0pi -e "s/(name = \"pf_core\"\nversion = \")$semver/\${1}$next/" Cargo.lock
+          perl -0pi -e "s/(name = \"pf_desk\"\nversion = \")$semver/\${1}$next/" Cargo.lock
+
+          echo "Bumped to $next:"
+          git --no-pager diff --stat
+
+      - name: Commit, tag, and push
+        shell: bash
+        run: |
+          next="${{ steps.version.outputs.next }}"
+          tag="${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # No [skip ci] here: this same commit is what the tag points at, and a
+          # skip marker would also suppress the tag-triggered release build. The
+          # loop is broken by the `if:` guards instead (this job's chore(release)
+          # check, and ci.yml skipping the bump commit's main push).
+          git commit -am "chore(release): $tag"
+          git tag -a "$tag" -m "$tag"
+          git push origin HEAD:main
+          git push origin "$tag"

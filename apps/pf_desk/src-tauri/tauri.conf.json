@@ -32,11 +32,21 @@
       "desktop": {
         "schemes": ["parcferme"]
       }
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/viik2k/parcferme-desktop/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJGQjkyQjRFODQ2OTkyQ0QKUldUTmttbUVUaXU1djkyZjk5L1l5ZHBMTTBtaFdtSExJd3hXR241dHlvamNOelBYdENVVUU4WlUK",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
     "active": true,
     "targets": ["msi", "nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
