@@ -24,6 +24,14 @@ export interface UploadedSetup {
 export const identifySetup = (path: string) =>
   invoke<SetupIdentity>("identify_setup", { path });
 
+/**
+ * Car names the site knows for a sim, for the car field's suggestions.
+ * Fails soft to `[]` — the field is free text either way, since a car new to
+ * the site may not be in the list yet.
+ */
+export const listCars = (sim: SimId) =>
+  invoke<string[]>("list_cars", { sim }).catch(() => [] as string[]);
+
 /** Push a local setup file to parcferme.cc as the linked user. */
 export const uploadSetup = (args: {
   path: string;

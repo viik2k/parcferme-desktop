@@ -202,7 +202,37 @@ a setup owned by the device token's linked user.
 `track` is **required for ACC and LMU** — the client refuses the upload without
 one rather than sending metadata the server has to reject. For LMU the client
 can only infer the track (its layout has no car folder), so `car` there is
-typed by the user and won't necessarily match a folder id.
+typed by the user and won't necessarily match a folder id. iRacing uploads may
+omit `track` (the server parks them on "Unknown Track"); the form offers it as
+an optional field so the owner doesn't have to fix it on the web afterwards.
+
+#### `car` may arrive as a display name (client behaviour, added 2026-07-25)
+
+The contract is unchanged — every field is still untrusted free text — but the
+client no longer always sends a raw folder id. The server resolves `car` by
+normalized equality, which cannot bridge a folder id that **abbreviates** its
+car: iRacing's `mercedesw13` never equals `mercedesamgw13eperformance`, so those
+uploads 422'd and the user had to guess the site's exact wording.
+
+`pf_core::car_aliases` holds a curated, **exceptions-only** map of folder id →
+exact Parc Fermé car name, applied both when the form pre-fills from disk and
+once more just before the request. Consequences for the server:
+
+- `car` is either an on-disk folder id (as before) or a car name copied from
+  `cars.getAll`. Normalized equality already accepts both, so nothing changes.
+- Cars whose folder id already normalize-matches are deliberately absent from
+  the map and still arrive as folder ids.
+- Anything the map doesn't know passes through untouched, so the
+  `422 unknown car "<value>"` message stays the user's guide — keep returning it
+  verbatim, and keep it JSON.
+
+The map's right-hand side is validated against the live `cars.getAll` list by an
+ignored test (`aliases_match_the_live_site`). **Renaming a seeded car breaks
+those aliases** — run that test after any `cars` reseed.
+
+The form also reads `cars.getAll` (public, no auth) to offer the sim's car names
+as autocomplete suggestions, failing soft to free text when the site is
+unreachable.
 
 `car`/`track` are the same internal folder ids §5 must *emit* — here the client
 *reads them off disk* (extension → sim; position under the sim's setups folder →

@@ -15,7 +15,7 @@ use serde::Serialize;
 use crate::api::{ApiClient, UploadMeta, UploadResult};
 use crate::settings::Settings;
 use crate::sim::{Folder, Sim};
-use crate::{auth, paths, Error, Result};
+use crate::{auth, car_aliases, paths, Error, Result};
 
 /// Largest file the client will push. Real setup files are a few KB — this
 /// only guards against picking the wrong file entirely (the server enforces
@@ -45,6 +45,11 @@ pub struct SetupIdentity {
 /// against the sim's own [`Sim::layout`]: `<root>\<car>\file` for iRacing,
 /// `<root>\<car>\<track>\file` for ACC, `<root>\<track>\file` for LMU.
 /// A file anywhere else simply yields `None`s — the UI asks the user instead.
+///
+/// The inferred car is passed through [`car_aliases`], so a folder id that
+/// abbreviates its car (`mercedesw13`) pre-fills the form with the name the
+/// site actually knows ("Mercedes-AMG W13 E Performance") instead of a value
+/// the server would reject.
 pub fn identify(path: &Path, settings: &Settings) -> SetupIdentity {
     let filename = path
         .file_name()
@@ -54,6 +59,10 @@ pub fn identify(path: &Path, settings: &Settings) -> SetupIdentity {
     let (car, track) = match sim {
         Some(sim) => locate_in_sim_tree(path, sim, settings),
         None => (None, None),
+    };
+    let car = match (sim, car) {
+        (Some(sim), Some(car)) => Some(car_aliases::apply(sim, &car).to_string()),
+        (_, car) => car,
     };
     SetupIdentity {
         filename,
@@ -130,7 +139,8 @@ fn relative_components(path: &Path, root: &Path) -> Option<Vec<String>> {
 ///
 /// `car`/`track` should be the sim's internal folder ids (exactly what
 /// [`identify`] reads off disk); the server maps them to its car/track records
-/// — see SERVER_CONTRACT §7.
+/// — see SERVER_CONTRACT §7. `car` runs through [`car_aliases`] one last time
+/// here, so a folder id typed by hand is aliased just like an inferred one.
 pub fn upload_setup(
     path: &Path,
     sim: Sim,
@@ -164,10 +174,15 @@ pub fn upload_setup(
     }
     let bytes = std::fs::read(path)?;
 
+    // Last stop before the wire: a folder id the server can't resolve becomes
+    // the site's own car name. A value that isn't a known exception — including
+    // one the user typed deliberately — passes through untouched.
+    let car = car_aliases::apply(sim, car);
+
     let token = auth::current_token()?.ok_or(Error::NotLinked)?;
 
     log::info!(
-        "uploading {filename} ({} bytes, sim {})",
+        "uploading {filename} ({} bytes, sim {}, car {car:?})",
         bytes.len(),
         sim.id()
     );
@@ -230,6 +245,14 @@ mod tests {
         assert_eq!(lmu.sim, Some(Sim::Lmu));
         assert_eq!(lmu.track.as_deref(), Some("Fuji"));
         assert_eq!(lmu.car, None);
+
+        // An abbreviated iRacing folder id pre-fills the site's car name, not
+        // the folder id the server would 422 on.
+        let aliased = identify(&root.join("mercedesw13").join("q.sto"), &settings);
+        assert_eq!(
+            aliased.car.as_deref(),
+            Some("Mercedes-AMG W13 E Performance")
+        );
 
         // iRacing file nested deeper still reads the first component as the car
         // (people keep subfolders per season) and no track.

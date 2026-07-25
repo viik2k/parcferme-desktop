@@ -7,6 +7,8 @@
 
 pub mod api;
 pub mod auth;
+pub mod car_aliases;
+pub mod cars;
 pub mod deeplink;
 pub mod download;
 mod error;

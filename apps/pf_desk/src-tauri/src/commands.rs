@@ -352,6 +352,20 @@ pub async fn identify_setup(path: String) -> Result<pf_core::upload::SetupIdenti
     .await
 }
 
+/// Car names the site knows for `sim`, for the upload form's suggestions.
+///
+/// Fails soft by design: an unreachable site yields an empty list, never an
+/// error, so the car field stays usable as free text (see [`pf_core::cars`]).
+#[tauri::command]
+pub async fn list_cars(sim: String) -> Result<Vec<String>, CmdError> {
+    blocking(move || {
+        Ok(Sim::from_id(&sim)
+            .map(pf_core::cars::names_for)
+            .unwrap_or_default())
+    })
+    .await
+}
+
 /// The uploaded setup as shown in the success card: its id and page URL.
 #[derive(Serialize)]
 pub struct UploadedSetupDto {
