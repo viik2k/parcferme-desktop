@@ -352,15 +352,17 @@ pub async fn identify_setup(path: String) -> Result<pf_core::upload::SetupIdenti
     .await
 }
 
-/// Car names the site knows for `sim`, for the upload form's suggestions.
+/// Car/track name lists the site knows for `sim`, for the upload form's
+/// picker suggestions.
 ///
-/// Fails soft by design: an unreachable site yields an empty list, never an
-/// error, so the car field stays usable as free text (see [`pf_core::cars`]).
+/// Fails soft by design: an unreachable site or an unpaired device yields
+/// empty lists, never an error, so the fields stay usable as free text (see
+/// [`pf_core::options`]).
 #[tauri::command]
-pub async fn list_cars(sim: String) -> Result<Vec<String>, CmdError> {
+pub async fn setup_options(sim: String) -> Result<pf_core::api::SetupOptions, CmdError> {
     blocking(move || {
         Ok(Sim::from_id(&sim)
-            .map(pf_core::cars::names_for)
+            .map(pf_core::options::options_for)
             .unwrap_or_default())
     })
     .await

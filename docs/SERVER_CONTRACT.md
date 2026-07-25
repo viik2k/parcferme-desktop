@@ -219,20 +219,19 @@ exact Parc Fermé car name, applied both when the form pre-fills from disk and
 once more just before the request. Consequences for the server:
 
 - `car` is either an on-disk folder id (as before) or a car name copied from
-  `cars.getAll`. Normalized equality already accepts both, so nothing changes.
+  the §7a suggestions. Normalized equality already accepts both, so nothing changes.
 - Cars whose folder id already normalize-matches are deliberately absent from
   the map and still arrive as folder ids.
 - Anything the map doesn't know passes through untouched, so the
   `422 unknown car "<value>"` message stays the user's guide — keep returning it
   verbatim, and keep it JSON.
 
-The map's right-hand side is validated against the live `cars.getAll` list by an
-ignored test (`aliases_match_the_live_site`). **Renaming a seeded car breaks
-those aliases** — run that test after any `cars` reseed.
+The map's right-hand side is validated against the live car list by an ignored
+test (`aliases_match_the_live_site`). **Renaming a seeded car breaks those
+aliases** — run that test after any `cars` reseed.
 
-The form also reads `cars.getAll` (public, no auth) to offer the sim's car names
-as autocomplete suggestions, failing soft to free text when the site is
-unreachable.
+The form reads §7a's options endpoint for its car/track suggestions, failing
+soft to free text when the site (or the device token) is unavailable.
 
 `car`/`track` are the same internal folder ids §5 must *emit* — here the client
 *reads them off disk* (extension → sim; position under the sim's setups folder →
@@ -255,6 +254,36 @@ Errors: `401` bad/revoked token · `403` uploads not permitted for this user ·
 `413` too large · `422` invalid metadata. The client maps 401 to its reconnect
 hint and surfaces the rest verbatim, so a JSON `{ "error": "…" }` body with a
 human-readable message is worth returning.
+
+## 7a. Picker suggestions — car/track name lists
+
+The upload form offers the site's own spelling as autocomplete suggestions, so
+users pick instead of guess (the alias table above only covers known folder-id
+exceptions). One authenticated call feeds both fields:
+
+### `GET /api/device/options?sim=<iracing|acc|lmu>`
+
+- `Authorization: Bearer <device token>` — same resolver as §3.
+- `sim` is required; anything else → `400 {"error":"sim must be one of: …"}`.
+
+Response `200`:
+
+```jsonc
+{
+  "cars": ["Ferrari 296 GT3", "…"],      // display names, sorted
+  "tracks": ["Spa-Francorchamps", "…"]   // display names, sorted
+}
+```
+
+- **Names only.** The client suggests; the §7 upload endpoint still resolves
+  every value to a row itself (normalized equality + the folder maps), so a
+  stale or partial list can never corrupt an upload.
+- `tracks` excludes the `"Unknown Track"` catch-all row §7 parks trackless
+  iRacing uploads on — it is a parking spot, not a suggestion.
+- Errors are JSON like the rest of the device API: `400` bad sim, `401`
+  bad/revoked token, `429` rate-limited, `500` otherwise.
+- The client caches per sim for the app's run and degrades any failure to
+  empty lists (no datalist), never an error in the form.
 
 ## 8. Release download (website "Download the app" button)
 

@@ -140,6 +140,19 @@ impl DownloadInfo {
     }
 }
 
+/// Car/track name lists for the upload form's pickers, returned by
+/// `GET /api/device/options?sim=…` (SERVER_CONTRACT §7a). Suggestions only:
+/// the upload endpoint re-resolves every value server-side, so a stale or
+/// partial list can never corrupt an upload. Both fields default so a server
+/// that predates one of the lists still parses.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SetupOptions {
+    #[serde(default)]
+    pub cars: Vec<String>,
+    #[serde(default)]
+    pub tracks: Vec<String>,
+}
+
 /// Metadata accompanying a pushed setup file (M5). `car`/`track` are the sim's
 /// internal folder ids exactly as found on the uploader's disk — the reverse of
 /// the §5 download mapping (SERVER_CONTRACT §7).
@@ -294,6 +307,33 @@ impl ApiClient {
                     format!(": {}", body.error)
                 };
                 Err(Error::Api(format!("download failed (HTTP {code}){detail}")))
+            }
+            Err(e) => Err(map_transport(e)),
+        }
+    }
+
+    /// Fetch the car/track name lists the upload form suggests from
+    /// (SERVER_CONTRACT §7a). Authenticated like the rest of the device API;
+    /// the caller degrades any failure to "no suggestions".
+    pub fn setup_options(&self, token: &str, sim: Sim) -> Result<SetupOptions> {
+        let result = self
+            .agent
+            .get(&self.url("/api/device/options"))
+            .query("sim", sim.id())
+            .set("Authorization", &format!("Bearer {token}"))
+            .call();
+        match result {
+            Ok(resp) => read_json(resp),
+            Err(ureq::Error::Status(code, resp)) => {
+                let body: ErrorBody = resp.into_json().unwrap_or_default();
+                let detail = if body.error.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", body.error)
+                };
+                Err(Error::Api(format!(
+                    "options fetch failed (HTTP {code}){detail}"
+                )))
             }
             Err(e) => Err(map_transport(e)),
         }
@@ -488,6 +528,21 @@ mod tests {
         // Nothing to go on at all → iRacing, matching the M2 single-sim server.
         let bare = info(r#"{ "url": "u", "filename": "mystery.bin", "car": "c" }"#);
         assert_eq!(bare.resolved_sim(), Sim::IRacing);
+    }
+
+    #[test]
+    fn setup_options_tolerates_missing_lists() {
+        // Full §7a response.
+        let full: SetupOptions = serde_json::from_str(
+            r#"{ "cars": ["Ferrari 296 GT3"], "tracks": ["Spa-Francorchamps"] }"#,
+        )
+        .unwrap();
+        assert_eq!(full.cars, vec!["Ferrari 296 GT3".to_string()]);
+        assert_eq!(full.tracks, vec!["Spa-Francorchamps".to_string()]);
+
+        // A server that predates one list still parses, as empty.
+        let partial: SetupOptions = serde_json::from_str(r#"{ "cars": [] }"#).unwrap();
+        assert!(partial.cars.is_empty() && partial.tracks.is_empty());
     }
 
     #[test]

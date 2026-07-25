@@ -24,13 +24,21 @@ export interface UploadedSetup {
 export const identifySetup = (path: string) =>
   invoke<SetupIdentity>("identify_setup", { path });
 
+/** Mirrors `pf_core::api::SetupOptions` as returned by `setup_options`. */
+export interface SetupOptions {
+  cars: string[];
+  tracks: string[];
+}
+
 /**
- * Car names the site knows for a sim, for the car field's suggestions.
- * Fails soft to `[]` — the field is free text either way, since a car new to
- * the site may not be in the list yet.
+ * Car/track names the site knows for a sim, for the form's suggestions.
+ * Fails soft to empty lists — the fields are free text either way, since a
+ * car or track new to the site may not be in the list yet.
  */
-export const listCars = (sim: SimId) =>
-  invoke<string[]>("list_cars", { sim }).catch(() => [] as string[]);
+export const setupOptions = (sim: SimId) =>
+  invoke<SetupOptions>("setup_options", { sim }).catch(
+    () => ({ cars: [], tracks: [] }) as SetupOptions,
+  );
 
 /** Push a local setup file to parcferme.cc as the linked user. */
 export const uploadSetup = (args: {

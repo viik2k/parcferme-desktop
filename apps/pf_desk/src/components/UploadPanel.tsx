@@ -5,8 +5,9 @@ import { errorHint, toCmdError, type CmdError } from "../lib/errors";
 import { SIM_OPTIONS, simLayout, type SimId } from "../lib/sims";
 import {
   identifySetup,
-  listCars,
+  setupOptions,
   uploadSetup,
+  type SetupOptions,
   type UploadedSetup,
 } from "../lib/upload";
 
@@ -27,13 +28,17 @@ export function UploadPanel() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<UploadedSetup | null>(null);
   const [error, setError] = useState<CmdError | null>(null);
-  const [knownCars, setKnownCars] = useState<string[]>([]);
+  const [options, setOptions] = useState<SetupOptions>({
+    cars: [],
+    tracks: [],
+  });
 
-  // Suggestions for the car field, so the user picks the site's spelling
-  // instead of guessing it. Cached per sim in the core; [] when offline.
+  // Suggestions for the car/track fields, so the user picks the site's
+  // spelling instead of guessing it. Cached per sim in the core; empty when
+  // offline or unpaired.
   useEffect(() => {
     let live = true;
-    void listCars(sim).then((cars) => live && setKnownCars(cars));
+    void setupOptions(sim).then((o) => live && setOptions(o));
     return () => {
       live = false;
     };
@@ -107,7 +112,7 @@ export function UploadPanel() {
       <p className="mt-1 text-sm text-muted">
         Share a setup from your sim folder to parcferme.cc. Picking a file from
         the setups folder fills in the car and track for you.
-        {knownCars.length > 0 && " Start typing to pick a car from the site."}
+        {options.cars.length > 0 && " Start typing to pick from the site's list."}
       </p>
 
       <button
@@ -150,7 +155,7 @@ export function UploadPanel() {
             {/* Suggestions only — a car the site has just added won't be
                 listed yet, so arbitrary text stays valid. */}
             <datalist id="pf-known-cars">
-              {knownCars.map((c) => (
+              {options.cars.map((c) => (
                 <option key={c} value={c} />
               ))}
             </datalist>
@@ -158,14 +163,17 @@ export function UploadPanel() {
 
           {showTrack && (
             <label className="block">
+              {/* Not "track folder": the server resolves site names and folder
+                  ids alike, and the suggestions are site names. */}
               <span className="font-medium text-muted">
                 {layout.track
-                  ? `Track folder${track ? "" : " — required"}`
+                  ? `Track${track ? "" : " — required"}`
                   : "Track on the site (optional)"}
               </span>
               <input
                 value={track}
                 onChange={(e) => setTrack(e.target.value)}
+                list="pf-known-tracks"
                 placeholder={
                   sim === "lmu"
                     ? "e.g. Fuji"
@@ -175,6 +183,11 @@ export function UploadPanel() {
                 }
                 className={fieldClass}
               />
+              <datalist id="pf-known-tracks">
+                {options.tracks.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
             </label>
           )}
 

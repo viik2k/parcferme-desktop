@@ -261,7 +261,7 @@ pub fn run() {
             commands::detect_sims,
             commands::download_setup,
             commands::identify_setup,
-            commands::list_cars,
+            commands::setup_options,
             commands::upload_setup,
         ])
         .run(tauri::generate_context!())
