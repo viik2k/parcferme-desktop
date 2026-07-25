@@ -7,9 +7,11 @@
 
 pub mod api;
 pub mod auth;
+pub mod car_aliases;
 pub mod deeplink;
 pub mod download;
 mod error;
+pub mod options;
 pub mod paths;
 pub mod settings;
 pub mod sim;

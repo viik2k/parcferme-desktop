@@ -5,11 +5,19 @@
 //! (Build Plan §3 + risk table). This module is the single source of truth for
 //! *where* a sim's setups live and *how* one setup is placed. iRacing shipped
 //! first (M2); ACC and LMU are added here. To support another sim, add a variant
-//! and fill in [`Sim::setups_root`] + [`Sim::needs_track_subfolder`].
+//! and fill in [`Sim::setups_root`] + [`Sim::layout`].
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+/// One folder level between a sim's setups root and the setup file itself.
+/// The *order* matters and differs per sim — see [`Sim::layout`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Folder {
+    Car,
+    Track,
+}
 
 /// A racing sim ParcFerme can install setups into.
 ///
@@ -25,8 +33,10 @@ pub enum Sim {
     /// The `<track>` subfolder is **required**; without it ACC won't list the
     /// setup in-game.
     Acc,
-    /// Le Mans Ultimate — `…\UserData\player\Settings\<car>\*.svm` (rFactor 2
-    /// heritage). Path unverified against a live install — see [`Sim::setups_root`].
+    /// Le Mans Ultimate — `<steam>\…\Le Mans Ultimate\UserData\player\Settings\<track>\*.svm`
+    /// (rFactor 2 heritage). Verified against a live install 2026-07-25: LMU
+    /// files setups by **track**, with no car folder at all, and keeps
+    /// `UserData` inside the game install rather than under Documents.
     Lmu,
 }
 
@@ -81,30 +91,49 @@ impl Sim {
         }
     }
 
-    /// The setups root for this sim under the user's `documents` directory. The
-    /// per-setup `<car>[\<track>]` subfolders are added by
-    /// [`crate::paths::setup_target_dir`], not here.
-    ///
-    /// **LMU caveat:** the rFactor 2 layout (`UserData\player\Settings`) is our
-    /// best understanding but has not been confirmed against a live Le Mans
-    /// Ultimate install. Verify before relying on the LMU flow; iRacing and ACC
-    /// are the confirmed targets.
-    pub fn setups_root(self, documents: &Path) -> PathBuf {
+    /// The setups root for this sim beneath `base`, where `base` is the sim's
+    /// **install base**: the user's Documents folder for iRacing and ACC, the
+    /// game's own install directory for LMU (which keeps `UserData` next to the
+    /// exe, rF2-style). [`crate::paths::default_setups_dir`] resolves the right
+    /// base per sim; the per-setup subfolders are added by
+    /// [`crate::paths::setup_target_dir`].
+    pub fn setups_root(self, base: &Path) -> PathBuf {
         match self {
-            Sim::IRacing => documents.join("iRacing").join("setups"),
-            Sim::Acc => documents.join("Assetto Corsa Competizione").join("Setups"),
-            Sim::Lmu => documents
-                .join("Le Mans Ultimate")
-                .join("UserData")
-                .join("player")
-                .join("Settings"),
+            Sim::IRacing => base.join("iRacing").join("setups"),
+            Sim::Acc => base.join("Assetto Corsa Competizione").join("Setups"),
+            Sim::Lmu => base.join("UserData").join("player").join("Settings"),
         }
     }
 
-    /// Whether a setup needs a `<track>` subfolder under its `<car>` folder to be
-    /// visible in-game. Only ACC does.
-    pub fn needs_track_subfolder(self) -> bool {
-        matches!(self, Sim::Acc)
+    /// The folder levels between the setups root and the setup file, **in path
+    /// order**. This is what a sim needs to list a setup in-game:
+    ///
+    /// | sim     | layout            |
+    /// | :------ | :---------------- |
+    /// | iRacing | `<car>\`          |
+    /// | ACC     | `<car>\<track>\`  |
+    /// | LMU     | `<track>\`        |
+    ///
+    /// LMU is the odd one out in both order and content — it groups by track and
+    /// has no car folder — so the layout can't be reduced to "does it nest by
+    /// track".
+    pub fn layout(self) -> &'static [Folder] {
+        match self {
+            Sim::IRacing => &[Folder::Car],
+            Sim::Acc => &[Folder::Car, Folder::Track],
+            Sim::Lmu => &[Folder::Track],
+        }
+    }
+
+    /// Whether a setup needs a `<track>` folder to be visible in-game (ACC, LMU).
+    pub fn needs_track_folder(self) -> bool {
+        self.layout().contains(&Folder::Track)
+    }
+
+    /// Whether the sim's folder layout has a `<car>` level (iRacing, ACC).
+    /// A setup still *has* a car for LMU — it just isn't part of the path.
+    pub fn needs_car_folder(self) -> bool {
+        self.layout().contains(&Folder::Car)
     }
 }
 
@@ -147,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn setups_root_is_sim_specific_and_under_documents() {
+    fn setups_root_is_sim_specific_under_its_base() {
         let docs = Path::new("/home/u/Documents");
         let iracing = Sim::IRacing.setups_root(docs);
         assert!(iracing.ends_with("setups"));
@@ -157,16 +186,28 @@ mod tests {
         assert!(acc.ends_with("Setups"));
         assert!(acc.to_string_lossy().contains("Assetto Corsa Competizione"));
 
-        let lmu = Sim::Lmu.setups_root(docs);
-        assert!(lmu.ends_with("Settings"));
-        assert!(lmu.to_string_lossy().contains("Le Mans Ultimate"));
+        // LMU's base is the game install, not Documents — the root is
+        // `UserData\player\Settings` directly beneath it.
+        let install = Path::new("/steam/steamapps/common/Le Mans Ultimate");
+        let lmu = Sim::Lmu.setups_root(install);
+        assert_eq!(
+            lmu,
+            install.join("UserData").join("player").join("Settings")
+        );
     }
 
     #[test]
-    fn only_acc_needs_a_track_subfolder() {
-        assert!(Sim::Acc.needs_track_subfolder());
-        assert!(!Sim::IRacing.needs_track_subfolder());
-        assert!(!Sim::Lmu.needs_track_subfolder());
+    fn layout_matches_each_sim_on_disk() {
+        // Verified against live installs: iRacing by car, ACC by car+track,
+        // LMU by track alone (no car folder).
+        assert_eq!(Sim::IRacing.layout(), &[Folder::Car]);
+        assert_eq!(Sim::Acc.layout(), &[Folder::Car, Folder::Track]);
+        assert_eq!(Sim::Lmu.layout(), &[Folder::Track]);
+
+        assert!(Sim::Acc.needs_track_folder() && Sim::Lmu.needs_track_folder());
+        assert!(!Sim::IRacing.needs_track_folder());
+        assert!(Sim::IRacing.needs_car_folder() && Sim::Acc.needs_car_folder());
+        assert!(!Sim::Lmu.needs_car_folder());
     }
 
     #[test]

@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { simLayout } from "./sims";
+
 /**
  * Mirrors `pf_core::download::InstallAction` — how the file landed on disk.
  * Words the success toast: fresh install, replaced, kept alongside as a
@@ -20,7 +22,7 @@ export interface InstalledSetup {
   /** Stable sim id: "iracing" | "acc" | "lmu". */
   sim_id: string;
   car: string;
-  /** Track subfolder (ACC); null for sims that don't nest by track. */
+  /** Track folder (ACC, LMU); null for sims that don't file by track. */
   track: string | null;
   name: string | null;
 }
@@ -65,16 +67,16 @@ export const downloadSetup = (input: string) =>
   invoke<InstalledSetup>("download_setup", { input });
 
 /**
- * ACC only lists a setup in-game when it sits in `<car>\<track>\`. If the
- * server sent no track, we still install the file (under `<car>\`) but the
+ * ACC and LMU only list a setup in-game when it sits in its track folder. If
+ * the server sent no track we still install the file, one level up, but the
  * user deserves a heads-up on where it went and why it may not show up.
  */
 export function needsTrackNote(s: InstalledSetup): boolean {
-  return s.sim_id === "acc" && !s.track;
+  return simLayout(s.sim_id).track && !s.track;
 }
 
-export const TRACK_NOTE =
-  "No track info came with this setup, so ACC may not list it in-game. " +
+export const trackNote = (s: InstalledSetup) =>
+  `No track info came with this setup, so ${s.sim} may not list it in-game. ` +
   "Move it into the matching track folder if it doesn't show up.";
 
 /** Success-toast copy per install action (shared by banner + download panel). */

@@ -14,8 +14,8 @@ use serde::Serialize;
 
 use crate::api::{ApiClient, UploadMeta, UploadResult};
 use crate::settings::Settings;
-use crate::sim::Sim;
-use crate::{auth, paths, Error, Result};
+use crate::sim::{Folder, Sim};
+use crate::{auth, car_aliases, paths, Error, Result};
 
 /// Largest file the client will push. Real setup files are a few KB — this
 /// only guards against picking the wrong file entirely (the server enforces
@@ -30,18 +30,26 @@ pub struct SetupIdentity {
     pub filename: String,
     /// Sim inferred from the extension; `None` for an unrecognized format.
     pub sim: Option<Sim>,
-    /// Car folder id, when the file sits under the sim's setups root.
+    /// Car folder id, for sims whose layout has a car level (iRacing, ACC).
+    /// Always `None` for LMU, which files by track alone — the user names the
+    /// car in the form.
     pub car: Option<String>,
-    /// Track folder id (ACC layout only).
+    /// Track folder id, for sims whose layout has a track level (ACC, LMU).
     pub track: Option<String>,
 }
 
 /// Infer sim/car/track for a setup file the user picked.
 ///
 /// Sim comes from the extension. Car/track come from the file's position under
-/// that sim's setups root (override-aware, same resolution as downloads):
-/// `<root>\<car>\file` → car, `<root>\<car>\<track>\file` → car + track (ACC).
+/// that sim's setups root (override-aware, same resolution as downloads), read
+/// against the sim's own [`Sim::layout`]: `<root>\<car>\file` for iRacing,
+/// `<root>\<car>\<track>\file` for ACC, `<root>\<track>\file` for LMU.
 /// A file anywhere else simply yields `None`s — the UI asks the user instead.
+///
+/// The inferred car is passed through [`car_aliases`], so a folder id that
+/// abbreviates its car (`mercedesw13`) pre-fills the form with the name the
+/// site actually knows ("Mercedes-AMG W13 E Performance") instead of a value
+/// the server would reject.
 pub fn identify(path: &Path, settings: &Settings) -> SetupIdentity {
     let filename = path
         .file_name()
@@ -52,6 +60,10 @@ pub fn identify(path: &Path, settings: &Settings) -> SetupIdentity {
         Some(sim) => locate_in_sim_tree(path, sim, settings),
         None => (None, None),
     };
+    let car = match (sim, car) {
+        (Some(sim), Some(car)) => Some(car_aliases::apply(sim, &car).to_string()),
+        (_, car) => car,
+    };
     SetupIdentity {
         filename,
         sim,
@@ -60,9 +72,14 @@ pub fn identify(path: &Path, settings: &Settings) -> SetupIdentity {
     }
 }
 
-/// Read `<car>[\<track>]` off `path`'s position under `sim`'s setups root.
-/// Any mismatch (different root, file directly in the root) is `(None, None)`
-/// — inference must never block an upload.
+/// Read the sim's folder levels off `path`'s position under its setups root,
+/// mapping them onto [`Sim::layout`] in order. Any mismatch (different root,
+/// file directly in the root) is `(None, None)` — inference must never block an
+/// upload.
+///
+/// LMU caveat: a setup saved from the garage rather than at a track sits in a
+/// *car*-named folder, which we'd report as its track. Nothing on disk
+/// distinguishes the two, and every field stays editable, so the guess stands.
 fn locate_in_sim_tree(
     path: &Path,
     sim: Sim,
@@ -72,31 +89,58 @@ fn locate_in_sim_tree(
     let Some(root) = status.dir else {
         return (None, None);
     };
-    // ponytail: strip_prefix compares components literally; a casing mismatch
-    // (rare — both sides come from the same OS) just degrades to manual entry.
-    let Ok(rel) = path.strip_prefix(&root) else {
+    let Some(parts) = relative_components(path, &root) else {
         return (None, None);
     };
-    let parts: Vec<String> = rel
-        .components()
-        .map(|c| c.as_os_str().to_string_lossy().into_owned())
-        .collect();
-    match parts.len() {
-        // Directly in the root (or empty): no car folder to read.
-        0 | 1 => (None, None),
-        2 => (Some(parts[0].clone()), None),
-        _ => (
-            Some(parts[0].clone()),
-            sim.needs_track_subfolder().then(|| parts[1].clone()),
-        ),
+    // Drop the file itself; whatever folders precede it line up with the layout.
+    // Extra nesting past the layout (people keep per-season subfolders) is
+    // ignored by the zip.
+    let folders = &parts[..parts.len().saturating_sub(1)];
+
+    let mut car = None;
+    let mut track = None;
+    for (level, value) in sim.layout().iter().zip(folders) {
+        match level {
+            Folder::Car => car = Some(value.clone()),
+            Folder::Track => track = Some(value.clone()),
+        }
     }
+    (car, track)
+}
+
+/// The path components of `path` below `root`, or `None` if it isn't under it.
+///
+/// Compares component-wise and **case-insensitively**, unlike
+/// `Path::strip_prefix`. Windows paths are case-insensitive and the two sides
+/// reach us from different places — the file picker gives
+/// `C:\Program Files (x86)\Steam\…` while LMU's root is detected from Steam's
+/// registry value, which reads `c:/program files (x86)/steam`. A literal
+/// comparison never matches those, silently dropping every LMU inference.
+/// Comparing components also makes the `/` vs `\` difference a non-issue.
+fn relative_components(path: &Path, root: &Path) -> Option<Vec<String>> {
+    let split = |p: &Path| -> Vec<String> {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect()
+    };
+    let parts = split(path);
+    let root_parts = split(root);
+    // ponytail: ASCII-only folding — a non-ASCII folder name still compares
+    // exactly, which is the old behaviour and degrades to manual entry.
+    let under = parts.len() > root_parts.len()
+        && root_parts
+            .iter()
+            .zip(&parts)
+            .all(|(r, p)| r.eq_ignore_ascii_case(p));
+    under.then(|| parts[root_parts.len()..].to_vec())
 }
 
 /// Push one setup file to parcferme.cc as this device's linked user.
 ///
 /// `car`/`track` should be the sim's internal folder ids (exactly what
 /// [`identify`] reads off disk); the server maps them to its car/track records
-/// — see SERVER_CONTRACT §7.
+/// — see SERVER_CONTRACT §7. `car` runs through [`car_aliases`] one last time
+/// here, so a folder id typed by hand is aliased just like an inferred one.
 pub fn upload_setup(
     path: &Path,
     sim: Sim,
@@ -112,6 +156,16 @@ pub fn upload_setup(
         .filter(|f| !f.is_empty())
         .ok_or_else(|| Error::Api(format!("not a file: {}", path.display())))?;
 
+    // Sims that file by track can't place the setup without one, and the server
+    // rejects the metadata outright — say so plainly instead of surfacing an HTTP
+    // error the user can't act on.
+    if sim.needs_track_folder() && track.is_none_or(|t| t.trim().is_empty()) {
+        return Err(Error::Api(format!(
+            "{} files setups by track, so this upload needs a track before it can be shared",
+            sim.display_name()
+        )));
+    }
+
     let size = std::fs::metadata(path)?.len();
     if size > MAX_UPLOAD_BYTES {
         return Err(Error::Api(format!(
@@ -120,10 +174,15 @@ pub fn upload_setup(
     }
     let bytes = std::fs::read(path)?;
 
+    // Last stop before the wire: a folder id the server can't resolve becomes
+    // the site's own car name. A value that isn't a known exception — including
+    // one the user typed deliberately — passes through untouched.
+    let car = car_aliases::apply(sim, car);
+
     let token = auth::current_token()?.ok_or(Error::NotLinked)?;
 
     log::info!(
-        "uploading {filename} ({} bytes, sim {})",
+        "uploading {filename} ({} bytes, sim {}, car {car:?})",
         bytes.len(),
         sim.id()
     );
@@ -180,6 +239,21 @@ mod tests {
         assert_eq!(ir.car.as_deref(), Some("ferrari296gt3"));
         assert_eq!(ir.track, None);
 
+        // LMU: <root>\<track>\file.svm → track, never a car. Reading the folder
+        // as a car is the 2026-07-25 upload bug.
+        let lmu = identify(&root.join("Fuji").join("GT3_Balanced.svm"), &settings);
+        assert_eq!(lmu.sim, Some(Sim::Lmu));
+        assert_eq!(lmu.track.as_deref(), Some("Fuji"));
+        assert_eq!(lmu.car, None);
+
+        // An abbreviated iRacing folder id pre-fills the site's car name, not
+        // the folder id the server would 422 on.
+        let aliased = identify(&root.join("mercedesw13").join("q.sto"), &settings);
+        assert_eq!(
+            aliased.car.as_deref(),
+            Some("Mercedes-AMG W13 E Performance")
+        );
+
         // iRacing file nested deeper still reads the first component as the car
         // (people keep subfolders per season) and no track.
         let deep = identify(
@@ -213,6 +287,27 @@ mod tests {
     }
 
     #[test]
+    fn root_matching_ignores_case_and_separators() {
+        // LMU's root comes from Steam's registry value (`c:/program files…`)
+        // while the file picker returns `C:\Program Files…` — a literal
+        // strip_prefix matches neither, and every inference silently dies.
+        let root = Path::new(r"c:/steam/common/Le Mans Ultimate/UserData");
+        let picked = Path::new(r"C:\Steam\Common\Le Mans Ultimate\USERDATA\Fuji\q.svm");
+        assert_eq!(
+            relative_components(picked, root),
+            Some(vec!["Fuji".to_string(), "q.svm".to_string()])
+        );
+
+        // A genuinely different tree still doesn't match…
+        assert_eq!(
+            relative_components(Path::new(r"C:\Elsewhere\q.svm"), root),
+            None
+        );
+        // …and the root itself has no components below it.
+        assert_eq!(relative_components(root, root), None);
+    }
+
+    #[test]
     fn upload_rejects_oversized_and_missing_files() {
         let dir = scratch("reject");
         std::fs::create_dir_all(&dir).unwrap();
@@ -226,6 +321,23 @@ mod tests {
         std::fs::write(&big, vec![0u8; (MAX_UPLOAD_BYTES + 1) as usize]).unwrap();
         let too_big = upload_setup(&big, Sim::IRacing, "car", None, None);
         assert!(matches!(too_big, Err(Error::Api(_))));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn upload_refuses_a_track_sim_with_no_track() {
+        let dir = scratch("no-track");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("q.svm");
+        std::fs::write(&file, b"[setup]").unwrap();
+
+        // Missing and blank both fail before any keychain or network access —
+        // the server would 422 with nothing the user could act on.
+        for track in [None, Some("  ")] {
+            let err = upload_setup(&file, Sim::Lmu, "ferrari_499p", track, None);
+            assert!(matches!(err, Err(Error::Api(m)) if m.contains("track")));
+        }
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -3,7 +3,7 @@ import {
   actionLabel,
   downloadSetup,
   needsTrackNote,
-  TRACK_NOTE,
+  trackNote,
   type InstalledSetup,
 } from "../lib/download";
 import { errorHint, isSettingsFixable, toCmdError, type CmdError } from "../lib/errors";
@@ -78,7 +78,7 @@ export function DownloadPanel({ onOpenSettings }: { onOpenSettings: () => void }
             {result.path}
           </p>
           {needsTrackNote(result) && (
-            <p className="mt-1 text-xs text-success/80">{TRACK_NOTE}</p>
+            <p className="mt-1 text-xs text-success/80">{trackNote(result)}</p>
           )}
         </div>
       )}

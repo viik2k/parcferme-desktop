@@ -122,16 +122,17 @@ iRacing, so the client no longer trusts the tag blindly. Resolution order
 
 The server **should still send a correct `sim` tag** — it is the only signal
 for any future sim whose file extension isn't unique — and **must** send
-`track` for ACC setups, which the client cannot infer (without it the file
-lands in `<car>\` and ACC won't list it in-game; the app warns the user).
+`track` for **ACC and LMU** setups, which the client cannot infer (without it
+the file lands one folder up and the sim won't list it in-game; the app warns
+the user).
 
 The client (`pf_core`) routes the file by the resolved sim:
 
-| sim       | folder under Documents                                  | layout            |
-| :-------- | :------------------------------------------------------ | :---------------- |
-| `iracing` | `iRacing\setups`                                        | `<car>\`          |
-| `acc`     | `Assetto Corsa Competizione\Setups`                     | `<car>\<track>\`  |
-| `lmu`     | `Le Mans Ultimate\UserData\player\Settings` *(unverified)* | `<car>\`       |
+| sim       | setups root                                                    | layout           |
+| :-------- | :------------------------------------------------------------- | :--------------- |
+| `iracing` | `Documents\iRacing\setups`                                      | `<car>\`         |
+| `acc`     | `Documents\Assetto Corsa Competizione\Setups`                   | `<car>\<track>\` |
+| `lmu`     | `<steam>\steamapps\common\Le Mans Ultimate\UserData\player\Settings` | `<track>\`  |
 
 > **`car`/`track` must be the sim's internal folder ids, not display names.**
 > Each sim lists a setup only when it sits in the exact folder it expects:
@@ -142,8 +143,13 @@ The client (`pf_core`) routes the file by the resolved sim:
 > files land in a human-named folder and may not appear in-sim. (Carried over
 > from the M2 iRacing caveat; now applies per sim.)
 >
-> **LMU path is unverified** against a live Le Mans Ultimate install — confirm
-> the `UserData\player\Settings` layout before relying on the LMU flow.
+> **LMU is the exception** (verified against a live install 2026-07-25): it
+> keeps rFactor 2's layout, filing setups by **track only** — there is no car
+> folder in the path — and it stores `UserData` inside the **game install**
+> (a Steam library), not under Documents. So for `lmu`, `track` is what places
+> the file and `car` is metadata the client ignores when writing. The client
+> finds the install by walking Steam's `libraryfolders.vdf`; a non-Steam or
+> undetectable install falls back to the Settings folder override.
 
 ## 6. M3 "Equip" deep link (web → desktop)
 
@@ -190,8 +196,42 @@ a setup owned by the device token's linked user.
 | `filename` | yes      | file name as on disk, e.g. `quali_spa.json`                  |
 | `sim`      | yes      | `"iracing"` \| `"acc"` \| `"lmu"`                             |
 | `car`      | yes      | the sim's **internal car folder id** as found on disk         |
-| `track`    | ACC      | internal track folder id (from the `<car>\<track>\` layout)  |
+| `track`    | ACC, LMU | internal track folder id (see the per-sim layouts in §5)      |
 | `name`     | no       | display name typed by the user                               |
+
+`track` is **required for ACC and LMU** — the client refuses the upload without
+one rather than sending metadata the server has to reject. For LMU the client
+can only infer the track (its layout has no car folder), so `car` there is
+typed by the user and won't necessarily match a folder id. iRacing uploads may
+omit `track` (the server parks them on "Unknown Track"); the form offers it as
+an optional field so the owner doesn't have to fix it on the web afterwards.
+
+#### `car` may arrive as a display name (client behaviour, added 2026-07-25)
+
+The contract is unchanged — every field is still untrusted free text — but the
+client no longer always sends a raw folder id. The server resolves `car` by
+normalized equality, which cannot bridge a folder id that **abbreviates** its
+car: iRacing's `mercedesw13` never equals `mercedesamgw13eperformance`, so those
+uploads 422'd and the user had to guess the site's exact wording.
+
+`pf_core::car_aliases` holds a curated, **exceptions-only** map of folder id →
+exact Parc Fermé car name, applied both when the form pre-fills from disk and
+once more just before the request. Consequences for the server:
+
+- `car` is either an on-disk folder id (as before) or a car name copied from
+  the §7a suggestions. Normalized equality already accepts both, so nothing changes.
+- Cars whose folder id already normalize-matches are deliberately absent from
+  the map and still arrive as folder ids.
+- Anything the map doesn't know passes through untouched, so the
+  `422 unknown car "<value>"` message stays the user's guide — keep returning it
+  verbatim, and keep it JSON.
+
+The map's right-hand side is validated against the live car list by an ignored
+test (`aliases_match_the_live_site`). **Renaming a seeded car breaks those
+aliases** — run that test after any `cars` reseed.
+
+The form reads §7a's options endpoint for its car/track suggestions, failing
+soft to free text when the site (or the device token) is unavailable.
 
 `car`/`track` are the same internal folder ids §5 must *emit* — here the client
 *reads them off disk* (extension → sim; position under the sim's setups folder →
@@ -214,6 +254,36 @@ Errors: `401` bad/revoked token · `403` uploads not permitted for this user ·
 `413` too large · `422` invalid metadata. The client maps 401 to its reconnect
 hint and surfaces the rest verbatim, so a JSON `{ "error": "…" }` body with a
 human-readable message is worth returning.
+
+## 7a. Picker suggestions — car/track name lists
+
+The upload form offers the site's own spelling as autocomplete suggestions, so
+users pick instead of guess (the alias table above only covers known folder-id
+exceptions). One authenticated call feeds both fields:
+
+### `GET /api/device/options?sim=<iracing|acc|lmu>`
+
+- `Authorization: Bearer <device token>` — same resolver as §3.
+- `sim` is required; anything else → `400 {"error":"sim must be one of: …"}`.
+
+Response `200`:
+
+```jsonc
+{
+  "cars": ["Ferrari 296 GT3", "…"],      // display names, sorted
+  "tracks": ["Spa-Francorchamps", "…"]   // display names, sorted
+}
+```
+
+- **Names only.** The client suggests; the §7 upload endpoint still resolves
+  every value to a row itself (normalized equality + the folder maps), so a
+  stale or partial list can never corrupt an upload.
+- `tracks` excludes the `"Unknown Track"` catch-all row §7 parks trackless
+  iRacing uploads on — it is a parking spot, not a suggestion.
+- Errors are JSON like the rest of the device API: `400` bad sim, `401`
+  bad/revoked token, `429` rate-limited, `500` otherwise.
+- The client caches per sim for the app's run and degrades any failure to
+  empty lists (no datalist), never an error in the form.
 
 ## 8. Release download (website "Download the app" button)
 

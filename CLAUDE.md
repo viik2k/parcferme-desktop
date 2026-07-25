@@ -32,12 +32,14 @@ crates/pf_core/src/
 ├── lib.rs        # public API surface + APP_ID
 ├── auth.rs       # OAuth 2.0 device-authorization grant + Windows Credential Manager storage
 ├── api.rs        # typed blocking HTTP client for parcferme.cc (ureq, no async)
-├── paths.rs      # locate Documents\iRacing\setups\ (and ACC/LMU)
+├── car_aliases.rs # curated iRacing folder-id → site car-name map (upload prefill/submit)
+├── options.rs    # cached car/track name lists from /api/device/options (upload pickers)
+├── paths.rs      # locate each sim's setups root (Documents for iRacing/ACC, Steam libraries for LMU)
 ├── download.rs   # presigned-URL fetch → atomic, conflict-policy-aware write
 ├── upload.rs     # identify a local setup (sim/car/track off its path) + push to the site
 ├── deeplink.rs   # parse parcferme:// URL schemes
 ├── settings.rs   # persisted settings: per-sim folder overrides + conflict policy
-├── sim.rs        # supported sims: folder roots + per-sim layout
+├── sim.rs        # supported sims: folder roots + per-sim layout (`Sim::layout` — iRacing `<car>`, ACC `<car>\<track>`, LMU `<track>`)
 └── error.rs      # Error enum (+ kind() for the UI hint map) + Result<T> alias
 
 apps/pf_desk/src-tauri/src/

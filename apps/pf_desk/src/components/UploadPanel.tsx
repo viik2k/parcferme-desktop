@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { errorHint, toCmdError, type CmdError } from "../lib/errors";
+import { SIM_OPTIONS, simLayout, type SimId } from "../lib/sims";
 import {
   identifySetup,
-  SIM_OPTIONS,
+  setupOptions,
   uploadSetup,
-  type SimId,
+  type SetupOptions,
   type UploadedSetup,
 } from "../lib/upload";
 
@@ -27,6 +28,21 @@ export function UploadPanel() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<UploadedSetup | null>(null);
   const [error, setError] = useState<CmdError | null>(null);
+  const [options, setOptions] = useState<SetupOptions>({
+    cars: [],
+    tracks: [],
+  });
+
+  // Suggestions for the car/track fields, so the user picks the site's
+  // spelling instead of guessing it. Cached per sim in the core; empty when
+  // offline or unpaired.
+  useEffect(() => {
+    let live = true;
+    void setupOptions(sim).then((o) => live && setOptions(o));
+    return () => {
+      live = false;
+    };
+  }, [sim]);
 
   async function handlePick() {
     const picked = await pickFile({
@@ -61,7 +77,9 @@ export function UploadPanel() {
           path,
           sim,
           car: car.trim(),
-          track: track.trim() || undefined,
+          // Only ever send what the form is actually showing — switching sims
+          // after picking a file would otherwise submit a hidden field.
+          track: (showTrack && track.trim()) || undefined,
           name: name.trim() || undefined,
         }),
       );
@@ -72,7 +90,18 @@ export function UploadPanel() {
     }
   }
 
-  const canUpload = !!path && car.trim().length > 0 && phase !== "working";
+  // The car names the setup for the site whatever the sim's folders look like;
+  // a track is *required* only where the sim files by track (ACC, LMU), since
+  // without it the server can't place the setup. iRacing still gets an optional
+  // track field — the server parks a trackless upload on "Unknown Track", which
+  // is worth avoiding when the user already knows where the lap was set.
+  const layout = simLayout(sim);
+  const showTrack = layout.track || sim === "iracing";
+  const canUpload =
+    !!path &&
+    car.trim().length > 0 &&
+    (!layout.track || track.trim().length > 0) &&
+    phase !== "working";
   const hint = error ? errorHint(error.kind) : null;
   const fieldClass =
     "mt-1 w-full rounded-lg bg-background px-3 py-2 text-sm text-foreground ring-1 ring-border focus:outline-none focus:ring-primary";
@@ -83,6 +112,7 @@ export function UploadPanel() {
       <p className="mt-1 text-sm text-muted">
         Share a setup from your sim folder to parcferme.cc. Picking a file from
         the setups folder fills in the car and track for you.
+        {options.cars.length > 0 && " Start typing to pick from the site's list."}
       </p>
 
       <button
@@ -110,26 +140,54 @@ export function UploadPanel() {
           </label>
 
           <label className="block">
+            {/* Not "car folder": what goes to the site is its car name, which
+                the alias table fills in for folder ids that abbreviate it. */}
             <span className="font-medium text-muted">
-              Car folder{car ? "" : " — required"}
+              Car{car ? "" : " — required"}
             </span>
             <input
               value={car}
               onChange={(e) => setCar(e.target.value)}
-              placeholder="e.g. ferrari296gt3"
+              list="pf-known-cars"
+              placeholder="e.g. Ferrari 296 GT3"
               className={fieldClass}
             />
+            {/* Suggestions only — a car the site has just added won't be
+                listed yet, so arbitrary text stays valid. */}
+            <datalist id="pf-known-cars">
+              {options.cars.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
           </label>
 
-          {sim === "acc" && (
+          {showTrack && (
             <label className="block">
-              <span className="font-medium text-muted">Track folder</span>
+              {/* Not "track folder": the server resolves site names and folder
+                  ids alike, and the suggestions are site names. */}
+              <span className="font-medium text-muted">
+                {layout.track
+                  ? `Track${track ? "" : " — required"}`
+                  : "Track on the site (optional)"}
+              </span>
               <input
                 value={track}
                 onChange={(e) => setTrack(e.target.value)}
-                placeholder="e.g. spa"
+                list="pf-known-tracks"
+                placeholder={
+                  sim === "lmu"
+                    ? "e.g. Fuji"
+                    : sim === "acc"
+                      ? "e.g. spa"
+                      : "e.g. Watkins Glen"
+                }
                 className={fieldClass}
               />
+              <datalist id="pf-known-tracks">
+                {options.tracks.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
             </label>
           )}
 
