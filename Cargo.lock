@@ -2747,7 +2747,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pf_core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "keyring",
  "log",
@@ -2759,7 +2759,7 @@ dependencies = [
 
 [[package]]
 name = "pf_desk"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "log",
  "pf_core",
