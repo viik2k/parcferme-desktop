@@ -15,7 +15,7 @@ import {
   EQUIP_EVENT,
   needsTrackNote,
   OPEN_SETTINGS_EVENT,
-  TRACK_NOTE,
+  trackNote,
   type EquipOutcome,
 } from "./lib/download";
 import { errorHint, isSettingsFixable } from "./lib/errors";
@@ -105,7 +105,7 @@ function App() {
                 </span>
                 {needsTrackNote(equip) && (
                   <span className="mt-1 block text-xs text-success/80">
-                    {TRACK_NOTE}
+                    {trackNote(equip)}
                   </span>
                 )}
               </span>

@@ -2,13 +2,8 @@ import { useState } from "react";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { errorHint, toCmdError, type CmdError } from "../lib/errors";
-import {
-  identifySetup,
-  SIM_OPTIONS,
-  uploadSetup,
-  type SimId,
-  type UploadedSetup,
-} from "../lib/upload";
+import { SIM_OPTIONS, simLayout, type SimId } from "../lib/sims";
+import { identifySetup, uploadSetup, type UploadedSetup } from "../lib/upload";
 
 type Phase = "idle" | "working" | "done" | "error";
 
@@ -61,7 +56,9 @@ export function UploadPanel() {
           path,
           sim,
           car: car.trim(),
-          track: track.trim() || undefined,
+          // Never send a track the chosen sim doesn't file by — switching sims
+          // after picking a file would otherwise submit the hidden field.
+          track: (layout.track && track.trim()) || undefined,
           name: name.trim() || undefined,
         }),
       );
@@ -72,7 +69,15 @@ export function UploadPanel() {
     }
   }
 
-  const canUpload = !!path && car.trim().length > 0 && phase !== "working";
+  // The car names the setup for the site whatever the sim's folders look like;
+  // a track is required only where the sim files by track (ACC, LMU) — without
+  // it the server can't place the setup and rejects the upload.
+  const layout = simLayout(sim);
+  const canUpload =
+    !!path &&
+    car.trim().length > 0 &&
+    (!layout.track || track.trim().length > 0) &&
+    phase !== "working";
   const hint = error ? errorHint(error.kind) : null;
   const fieldClass =
     "mt-1 w-full rounded-lg bg-background px-3 py-2 text-sm text-foreground ring-1 ring-border focus:outline-none focus:ring-primary";
@@ -111,7 +116,8 @@ export function UploadPanel() {
 
           <label className="block">
             <span className="font-medium text-muted">
-              Car folder{car ? "" : " — required"}
+              {layout.car ? "Car folder" : "Car"}
+              {car ? "" : " — required"}
             </span>
             <input
               value={car}
@@ -121,13 +127,15 @@ export function UploadPanel() {
             />
           </label>
 
-          {sim === "acc" && (
+          {layout.track && (
             <label className="block">
-              <span className="font-medium text-muted">Track folder</span>
+              <span className="font-medium text-muted">
+                Track folder{track ? "" : " — required"}
+              </span>
               <input
                 value={track}
                 onChange={(e) => setTrack(e.target.value)}
-                placeholder="e.g. spa"
+                placeholder={sim === "lmu" ? "e.g. Fuji" : "e.g. spa"}
                 className={fieldClass}
               />
             </label>
