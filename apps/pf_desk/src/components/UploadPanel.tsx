@@ -25,6 +25,10 @@ export function UploadPanel() {
   const [car, setCar] = useState("");
   const [track, setTrack] = useState("");
   const [name, setName] = useState("");
+  // The car was matched to the site's list rather than read off disk, so the
+  // user is told before they upload it. Cleared the moment they touch the
+  // field — once they've weighed in, it isn't our guess any more.
+  const [carGuessed, setCarGuessed] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<UploadedSetup | null>(null);
   const [error, setError] = useState<CmdError | null>(null);
@@ -59,10 +63,12 @@ export function UploadPanel() {
       setFilename(id.filename);
       if (id.sim) setSim(id.sim);
       setCar(id.car ?? "");
+      setCarGuessed(id.car_source === "matched");
       setTrack(id.track ?? "");
     } catch {
       // Inference failing must not block a manual upload.
       setFilename(picked.split(/[\\/]/).pop() ?? picked);
+      setCarGuessed(false);
     }
   }
 
@@ -147,11 +153,22 @@ export function UploadPanel() {
             </span>
             <input
               value={car}
-              onChange={(e) => setCar(e.target.value)}
+              onChange={(e) => {
+                setCar(e.target.value);
+                setCarGuessed(false);
+              }}
               list="pf-known-cars"
               placeholder="e.g. Ferrari 296 GT3"
               className={fieldClass}
             />
+            {/* The folder didn't name the car outright, so this is the closest
+                name on the site rather than something read off disk. Say so —
+                a wrong guess must never be uploaded unnoticed. */}
+            {carGuessed && (
+              <span className="mt-1 block text-[0.7rem] text-muted">
+                Matched to the site's list — change it if that's the wrong car.
+              </span>
+            )}
             {/* Suggestions only — a car the site has just added won't be
                 listed yet, so arbitrary text stays valid. */}
             <datalist id="pf-known-cars">

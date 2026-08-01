@@ -11,7 +11,16 @@ export interface SetupIdentity {
   sim: SimId | null;
   car: string | null;
   track: string | null;
+  /** Mirrors `pf_core::upload::CarSource` — how `car` was arrived at. */
+  car_source: CarSource;
 }
+
+/**
+ * Where the pre-filled car name came from: read off disk (`folder`), a curated
+ * alias, an exact hit on the site's list, or `matched` — the closest name the
+ * matcher could find. Only `matched` is a guess, and the form says so.
+ */
+export type CarSource = "folder" | "alias" | "exact" | "matched";
 
 /** Mirrors `commands::UploadedSetupDto`. */
 export interface UploadedSetup {
