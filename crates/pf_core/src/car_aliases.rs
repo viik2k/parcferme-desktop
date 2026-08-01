@@ -10,8 +10,13 @@
 //!
 //! This table closes exactly that gap. It is **exceptions-only**: a car whose
 //! folder id already normalizes to its display name must *not* appear here, so
-//! the list stays short enough to review by eye. Anything absent passes through
-//! untouched and the server's 422 still guides the user.
+//! the list stays short enough to review by eye. Anything absent falls to
+//! [`crate::car_match`], which matches the folder id against the site's live
+//! car list — so a car seeded after this binary shipped no longer needs a
+//! release to become uploadable. The table now covers only what that matcher
+//! gets wrong (`porsche911cup` is "Porsche 911 GT3 Cup (991)", not the
+//! textually closer "Porsche 911 Cup (992.2)"), and it still wins wherever it
+//! has a row.
 //!
 //! **Provenance.** The iRacing rows pair the folder ids published in iRacing's
 //! own "Filepath for active iRacing cars" support article with the exact car
@@ -23,6 +28,7 @@
 //! is worse than the 422 it replaces. Confirm those against a live
 //! `Documents\iRacing\setups` before promoting them.
 
+use crate::car_match::normalize;
 use crate::sim::Sim;
 
 /// One `(normalized folder id, exact Parc Fermé car name)` pair.
@@ -120,6 +126,9 @@ const IRACING: &[Alias] = &[
 // Unconfirmed folder ids: iRacing's article lists each of these as a sub-variant
 // folder under a parent car directory, so the flat setups-folder name is not
 // proven. Verify against a real install, then move the row into IRACING above.
+// [`crate::car_match`] now takes a shot at these live — it resolves `dallara`
+// and declines the four Ruf variants as genuinely ambiguous — so promoting one
+// is only worth it where the matcher is silent or wrong.
 //   305                    -> Dirt Sprint Car - 305
 //   358                    -> Dirt 358 Modified
 //   360                    -> Dirt Sprint Car - 360
@@ -152,19 +161,6 @@ fn table(sim: Sim) -> &'static [Alias] {
         Sim::Acc => ACC,
         Sim::Lmu => LMU,
     }
-}
-
-/// Case-fold and strip to `[a-z0-9]`, mirroring the server's comparison.
-///
-/// ponytail: no NFKD pass — every folder id a sim writes is ASCII, and the
-/// server folds both sides anyway, so an accent can only appear in the name we
-/// *emit*, never in the key we match on.
-fn normalize(value: &str) -> String {
-    value
-        .chars()
-        .filter(char::is_ascii_alphanumeric)
-        .map(|c| c.to_ascii_lowercase())
-        .collect()
 }
 
 /// The site's car name for an on-disk folder id, or `None` when the value isn't
@@ -261,6 +257,42 @@ mod tests {
                 sim.id()
             );
             println!("{}: {} aliases all resolve", sim.id(), table(sim).len());
+        }
+    }
+
+    /// Which rows [`crate::car_match`] would now get right on its own, and
+    /// which it would get *wrong*. Diagnostic, not a gate — the table is only
+    /// ever pruned by hand, and a row the matcher agrees with today can still
+    /// be the thing that saves an upload when the site seeds a near-twin.
+    ///
+    /// Live, so ignored by default:
+    /// `cargo test -p pf_core matcher_coverage -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn matcher_coverage_of_the_curated_table() {
+        for sim in Sim::ALL {
+            let known = crate::options::options_for(sim).cars;
+            if known.is_empty() {
+                println!("{}: no car list (not linked?) — skipping", sim.id());
+                continue;
+            }
+            let (mut redundant, mut needed, mut wrong) = (0, 0, Vec::new());
+            for (folder, name) in table(sim) {
+                match crate::car_match::best_match(folder, &known) {
+                    Some(hit) if hit == *name => redundant += 1,
+                    Some(hit) => wrong.push((folder, *name, hit.to_string())),
+                    None => needed += 1,
+                }
+            }
+            println!(
+                "{}: {redundant} rows the matcher reproduces, {needed} it can't reach, \
+                 {} it would contradict",
+                sim.id(),
+                wrong.len()
+            );
+            for (folder, curated, hit) in &wrong {
+                println!("  {folder}: curated {curated:?} vs matched {hit:?}");
+            }
         }
     }
 

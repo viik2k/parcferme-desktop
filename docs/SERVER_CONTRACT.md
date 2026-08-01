@@ -233,6 +233,28 @@ aliases** — run that test after any `cars` reseed.
 The form reads §7a's options endpoint for its car/track suggestions, failing
 soft to free text when the site (or the device token) is unavailable.
 
+#### `car` may also be matched against §7a's list (client behaviour, added 2026-08-01)
+
+The map above is compiled into the binary, so every newly seeded car whose
+folder id abbreviates it needed a client release before it could be uploaded.
+`pf_core::car_match` removes that dependency: when the form pre-fills from disk
+and the folder id isn't a curated exception, the client matches it against
+§7a's `cars` list (exact → containment → subsequence → bounded edit distance)
+and pre-fills the winning name. Still nothing new for the server, but worth
+knowing:
+
+- The matcher **only runs on pre-fill**, never on submit. What the form shows
+  is what ships, so the user always sees and can correct a match. `car` values
+  the server receives are still just folder ids or names from §7a.
+- It resolves only when a **single** name is clearly closest; ties and weak
+  matches leave the folder id in place, so `422 unknown car` remains reachable
+  and must keep working.
+- A curated alias still wins over a match, **except** when the alias target is
+  absent from the live `cars` list — the client reads that as a server-side
+  rename and re-matches. Renaming a seeded car is therefore recoverable
+  without a client release, but §7a must keep listing every car that uploads
+  may name.
+
 `car`/`track` are the same internal folder ids §5 must *emit* — here the client
 *reads them off disk* (extension → sim; position under the sim's setups folder →
 car/track), so this is the reverse of the `cars.simRefId` mapping: resolve the

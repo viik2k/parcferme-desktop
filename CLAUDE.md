@@ -33,6 +33,7 @@ crates/pf_core/src/
 ├── auth.rs       # OAuth 2.0 device-authorization grant + Windows Credential Manager storage
 ├── api.rs        # typed blocking HTTP client for parcferme.cc (ureq, no async)
 ├── car_aliases.rs # curated iRacing folder-id → site car-name map (upload prefill/submit)
+├── car_match.rs  # match a folder id against the site's live car list (upload prefill only)
 ├── options.rs    # cached car/track name lists from /api/device/options (upload pickers)
 ├── paths.rs      # locate each sim's setups root (Documents for iRacing/ACC, Steam libraries for LMU)
 ├── download.rs   # presigned-URL fetch → atomic, conflict-policy-aware write

@@ -15,7 +15,7 @@ use serde::Serialize;
 use crate::api::{ApiClient, UploadMeta, UploadResult};
 use crate::settings::Settings;
 use crate::sim::{Folder, Sim};
-use crate::{auth, car_aliases, paths, Error, Result};
+use crate::{auth, car_aliases, car_match, paths, Error, Result};
 
 /// Largest file the client will push. Real setup files are a few KB — this
 /// only guards against picking the wrong file entirely (the server enforces
@@ -30,12 +30,34 @@ pub struct SetupIdentity {
     pub filename: String,
     /// Sim inferred from the extension; `None` for an unrecognized format.
     pub sim: Option<Sim>,
-    /// Car folder id, for sims whose layout has a car level (iRacing, ACC).
-    /// Always `None` for LMU, which files by track alone — the user names the
-    /// car in the form.
+    /// The car for the form: a folder id, or the site's own name for it when
+    /// one could be resolved (see [`car_source`](Self::car_source)). `None`
+    /// for LMU, which files by track alone — the user names the car there.
     pub car: Option<String>,
     /// Track folder id, for sims whose layout has a track level (ACC, LMU).
     pub track: Option<String>,
+    /// How [`car`](Self::car) was arrived at, so the form can mark a guess as
+    /// one. `Folder` whenever there is no car at all.
+    pub car_source: CarSource,
+}
+
+/// Where a pre-filled car name came from. Only [`CarSource::Matched`] is a
+/// guess — the UI says so, because a wrong guess must never ride along on an
+/// upload unnoticed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CarSource {
+    /// Straight off disk: nothing resolved it, so it's the folder id verbatim
+    /// (or there is no car to resolve).
+    Folder,
+    /// A curated [`car_aliases`] row — a decision someone made by hand.
+    Alias,
+    /// The site's list holds this exact car under [`car_match::exact_match`];
+    /// only the spelling changed, which is what the server does anyway.
+    Exact,
+    /// [`car_match::best_match`] picked the closest name on the site. A guess,
+    /// and the only variant the form flags.
+    Matched,
 }
 
 /// Infer sim/car/track for a setup file the user picked.
@@ -46,11 +68,32 @@ pub struct SetupIdentity {
 /// `<root>\<car>\<track>\file` for ACC, `<root>\<track>\file` for LMU.
 /// A file anywhere else simply yields `None`s — the UI asks the user instead.
 ///
-/// The inferred car is passed through [`car_aliases`], so a folder id that
-/// abbreviates its car (`mercedesw13`) pre-fills the form with the name the
-/// site actually knows ("Mercedes-AMG W13 E Performance") instead of a value
+/// The inferred car is resolved to the site's own name where possible (see
+/// [`resolve_car`]), so a folder id that abbreviates its car (`mercedesw13`)
+/// pre-fills the form with "Mercedes-AMG W13 E Performance" instead of a value
 /// the server would reject.
+///
+/// Fetches the sim's car list to do it, which fails soft to no list at all —
+/// offline or unpaired, this behaves exactly as it did before.
 pub fn identify(path: &Path, settings: &Settings) -> SetupIdentity {
+    // Sim comes off the extension alone, so the list can be fetched before any
+    // of the path work — and it's cached per run (see `crate::options`).
+    let known_cars = path
+        .file_name()
+        .and_then(|f| Sim::from_filename(&f.to_string_lossy()))
+        .map(|sim| crate::options::options_for(sim).cars)
+        .unwrap_or_default();
+    identify_with_cars(path, settings, &known_cars)
+}
+
+/// [`identify`] with the site's car list supplied by the caller — the pure
+/// form, for tests and for any caller that already has the list. An empty
+/// `known_cars` means "no list available", not "the site has no cars".
+pub fn identify_with_cars(
+    path: &Path,
+    settings: &Settings,
+    known_cars: &[String],
+) -> SetupIdentity {
     let filename = path
         .file_name()
         .map(|f| f.to_string_lossy().into_owned())
@@ -60,15 +103,51 @@ pub fn identify(path: &Path, settings: &Settings) -> SetupIdentity {
         Some(sim) => locate_in_sim_tree(path, sim, settings),
         None => (None, None),
     };
-    let car = match (sim, car) {
-        (Some(sim), Some(car)) => Some(car_aliases::apply(sim, &car).to_string()),
-        (_, car) => car,
+    let (car, car_source) = match (sim, car) {
+        (Some(sim), Some(car)) => {
+            let (name, source) = resolve_car(sim, &car, known_cars);
+            (Some(name), source)
+        }
+        (_, car) => (car, CarSource::Folder),
     };
     SetupIdentity {
         filename,
         sim,
         car,
         track,
+        car_source,
+    }
+}
+
+/// The site's name for an on-disk car folder id, and how confident we are.
+///
+/// Order matters. The curated [`car_aliases`] row wins wherever there is one —
+/// it is a decision someone made deliberately, and it exists precisely for the
+/// ids [`car_match`] gets wrong. It loses only when the list *proves* the site
+/// no longer carries that name, which is the rename case the table can't see;
+/// then the matcher gets its turn, and a stale alias is still preferred to the
+/// bare folder id.
+fn resolve_car(sim: Sim, folder: &str, known: &[String]) -> (String, CarSource) {
+    let alias = car_aliases::resolve(sim, folder);
+    // No list means no evidence of a rename — trust the table, as before.
+    if let Some(name) =
+        alias.filter(|a| known.is_empty() || car_match::exact_match(a, known).is_some())
+    {
+        return (name.to_string(), CarSource::Alias);
+    }
+    // The folder id already names a car the site knows; adopting its spelling
+    // is a formality, not a guess.
+    if let Some(name) = car_match::exact_match(folder, known) {
+        return (name.to_string(), CarSource::Exact);
+    }
+    if let Some(name) = car_match::best_match(folder, known) {
+        log::info!("matched car folder {folder:?} to {name:?} on the site's list");
+        return (name.to_string(), CarSource::Matched);
+    }
+    match alias {
+        // Renamed server-side and nothing matched: still closer than the id.
+        Some(name) => (name.to_string(), CarSource::Alias),
+        None => (folder.to_string(), CarSource::Folder),
     }
 }
 
@@ -141,6 +220,10 @@ fn relative_components(path: &Path, root: &Path) -> Option<Vec<String>> {
 /// [`identify`] reads off disk); the server maps them to its car/track records
 /// — see SERVER_CONTRACT §7. `car` runs through [`car_aliases`] one last time
 /// here, so a folder id typed by hand is aliased just like an inferred one.
+///
+/// Deliberately *not* [`car_match`]: a fuzzy match is a guess, and a guess may
+/// only be made where the user can see and correct it — [`identify`], which
+/// feeds the form. Whatever the form shows at submit time is what ships.
 pub fn upload_setup(
     path: &Path,
     sim: Sim,
@@ -219,13 +302,24 @@ mod tests {
         std::env::temp_dir().join(format!("pf-upload-{name}-{}", std::process::id()))
     }
 
+    fn cars(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    /// [`identify`] as it behaves with no car list — offline, unpaired, or
+    /// before the fetch lands. Layout inference is the same either way, and
+    /// these tests are about the layout, not the matcher.
+    fn identify_offline(path: &Path, settings: &Settings) -> SetupIdentity {
+        identify_with_cars(path, settings, &[])
+    }
+
     #[test]
     fn identify_reads_car_and_track_from_sim_layout() {
         let root = scratch("layout");
         let settings = scratch_settings(&root);
 
         // ACC: <root>\<car>\<track>\file.json → sim + car + track.
-        let acc = identify(
+        let acc = identify_offline(
             &root.join("ferrari_488_gt3_evo").join("spa").join("q.json"),
             &settings,
         );
@@ -234,21 +328,21 @@ mod tests {
         assert_eq!(acc.track.as_deref(), Some("spa"));
 
         // iRacing: <root>\<car>\file.sto → car, never a track.
-        let ir = identify(&root.join("ferrari296gt3").join("r.sto"), &settings);
+        let ir = identify_offline(&root.join("ferrari296gt3").join("r.sto"), &settings);
         assert_eq!(ir.sim, Some(Sim::IRacing));
         assert_eq!(ir.car.as_deref(), Some("ferrari296gt3"));
         assert_eq!(ir.track, None);
 
         // LMU: <root>\<track>\file.svm → track, never a car. Reading the folder
         // as a car is the 2026-07-25 upload bug.
-        let lmu = identify(&root.join("Fuji").join("GT3_Balanced.svm"), &settings);
+        let lmu = identify_offline(&root.join("Fuji").join("GT3_Balanced.svm"), &settings);
         assert_eq!(lmu.sim, Some(Sim::Lmu));
         assert_eq!(lmu.track.as_deref(), Some("Fuji"));
         assert_eq!(lmu.car, None);
 
         // An abbreviated iRacing folder id pre-fills the site's car name, not
         // the folder id the server would 422 on.
-        let aliased = identify(&root.join("mercedesw13").join("q.sto"), &settings);
+        let aliased = identify_offline(&root.join("mercedesw13").join("q.sto"), &settings);
         assert_eq!(
             aliased.car.as_deref(),
             Some("Mercedes-AMG W13 E Performance")
@@ -256,7 +350,7 @@ mod tests {
 
         // iRacing file nested deeper still reads the first component as the car
         // (people keep subfolders per season) and no track.
-        let deep = identify(
+        let deep = identify_offline(
             &root.join("ferrari296gt3").join("2026s3").join("r.sto"),
             &settings,
         );
@@ -265,23 +359,100 @@ mod tests {
     }
 
     #[test]
+    fn identify_resolves_the_car_against_the_sites_list() {
+        let root = scratch("known-cars");
+        let settings = scratch_settings(&root);
+        let sto = |car: &str| root.join(car).join("q.sto");
+
+        // The point of the whole change: a car the site seeded after this
+        // binary shipped. No alias row exists for `mercedesw14` — and none
+        // needs to, because the name is right there in the list.
+        let known = cars(&["Mercedes-AMG W14 E Performance", "Ferrari 296 GT3"]);
+        let id = identify_with_cars(&sto("mercedesw14"), &settings, &known);
+        assert_eq!(id.car.as_deref(), Some("Mercedes-AMG W14 E Performance"));
+        assert_eq!(id.car_source, CarSource::Matched);
+
+        // A folder id that already normalize-matches gets the site's spelling,
+        // and isn't reported as a guess — the server would have resolved it.
+        let id = identify_with_cars(&sto("ferrari296gt3"), &settings, &known);
+        assert_eq!(id.car.as_deref(), Some("Ferrari 296 GT3"));
+        assert_eq!(id.car_source, CarSource::Exact);
+
+        // Nothing plausible on the list: the folder id stands, exactly as
+        // before, and the server's 422 remains the user's guide.
+        let id = identify_with_cars(&sto("somenewcar2027"), &settings, &known);
+        assert_eq!(id.car.as_deref(), Some("somenewcar2027"));
+        assert_eq!(id.car_source, CarSource::Folder);
+    }
+
+    #[test]
+    fn curated_aliases_outrank_the_matcher() {
+        let root = scratch("alias-wins");
+        let settings = scratch_settings(&root);
+        let path = root.join("porsche911cup").join("q.sto");
+
+        // Both names are on the site and the textually closer one is the wrong
+        // car — `porsche911cup` is the 991 GT3 Cup. This is precisely the kind
+        // of row the curated table still earns its place with…
+        let known = cars(&["Porsche 911 GT3 Cup (991)", "Porsche 911 Cup (992.2)"]);
+        assert_eq!(
+            car_match::best_match("porsche911cup", &known),
+            Some("Porsche 911 Cup (992.2)"),
+            "matcher would take the wrong one — hence the alias row"
+        );
+        let id = identify_with_cars(&path, &settings, &known);
+        assert_eq!(id.car.as_deref(), Some("Porsche 911 GT3 Cup (991)"));
+        assert_eq!(id.car_source, CarSource::Alias);
+    }
+
+    #[test]
+    fn a_renamed_car_falls_back_to_the_matcher() {
+        let root = scratch("renamed");
+        let settings = scratch_settings(&root);
+        let path = root.join("mercedesw13").join("q.sto");
+
+        // The site renamed the car out from under the alias row. Left alone
+        // the alias would now *cause* the 422 it was added to prevent, so the
+        // matcher gets its turn and finds the new name.
+        let renamed = cars(&["Mercedes-AMG W13 E Performance (2023)"]);
+        let id = identify_with_cars(&path, &settings, &renamed);
+        assert_eq!(
+            id.car.as_deref(),
+            Some("Mercedes-AMG W13 E Performance (2023)")
+        );
+        assert_eq!(id.car_source, CarSource::Matched);
+
+        // Renamed beyond recognition: the alias is stale but still a better
+        // guess than the folder id, and the user can see and fix it.
+        let gone = cars(&["Ferrari 296 GT3"]);
+        let id = identify_with_cars(&path, &settings, &gone);
+        assert_eq!(id.car.as_deref(), Some("Mercedes-AMG W13 E Performance"));
+        assert_eq!(id.car_source, CarSource::Alias);
+
+        // No list at all (offline, unpaired) is not evidence of a rename.
+        let id = identify_with_cars(&path, &settings, &[]);
+        assert_eq!(id.car.as_deref(), Some("Mercedes-AMG W13 E Performance"));
+        assert_eq!(id.car_source, CarSource::Alias);
+    }
+
+    #[test]
     fn identify_degrades_to_none_outside_the_sim_tree() {
         let root = scratch("outside");
         let settings = scratch_settings(&root);
 
         // Recognized format but foreign location: sim yes, car/track no.
-        let desktop = identify(Path::new(r"C:\Users\x\Desktop\q.json"), &settings);
+        let desktop = identify_offline(Path::new(r"C:\Users\x\Desktop\q.json"), &settings);
         assert_eq!(desktop.sim, Some(Sim::Acc));
         assert_eq!(desktop.car, None);
         assert_eq!(desktop.track, None);
 
         // File directly in the setups root: no car folder to read.
-        let bare = identify(&root.join("loose.sto"), &settings);
+        let bare = identify_offline(&root.join("loose.sto"), &settings);
         assert_eq!(bare.sim, Some(Sim::IRacing));
         assert_eq!(bare.car, None);
 
         // Unrecognized extension: nothing inferred, filename still reported.
-        let zip = identify(&root.join("car").join("pack.zip"), &settings);
+        let zip = identify_offline(&root.join("car").join("pack.zip"), &settings);
         assert_eq!(zip.sim, None);
         assert_eq!(zip.filename, "pack.zip");
     }
