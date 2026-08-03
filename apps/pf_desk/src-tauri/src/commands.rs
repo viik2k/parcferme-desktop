@@ -333,6 +333,14 @@ pub async fn download_setup(input: String) -> Result<InstalledSetupDto, CmdError
     .await
 }
 
+/// The setups the linked account can install, for the browse list —
+/// `scope` is `"mine"` (their own) or `"team"` (their teams' vaults).
+/// Returns ids the UI hands straight to [`download_setup`].
+#[tauri::command]
+pub async fn list_setups(scope: String) -> Result<Vec<pf_core::api::SetupSummary>, CmdError> {
+    blocking(move || Ok(download::list_setups(&scope)?)).await
+}
+
 // ---------------------------------------------------------------------------
 // Push a setup (M5)
 // ---------------------------------------------------------------------------

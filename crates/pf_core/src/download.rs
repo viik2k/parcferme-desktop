@@ -105,6 +105,18 @@ pub fn download_setup(setup_uuid: &str, settings: &Settings) -> Result<Installed
     })
 }
 
+/// The setups this device may install, for the in-app browse list
+/// (SERVER_CONTRACT §9). `scope` is `"mine"` or `"team"`.
+///
+/// Lives beside [`download_setup`] because that is all the list is for: every
+/// row's `id` is a setup uuid the Install button feeds straight back in.
+pub fn list_setups(scope: &str) -> Result<Vec<crate::api::SetupSummary>> {
+    let token = auth::current_token()?.ok_or(Error::NotLinked)?;
+    let setups = ApiClient::from_env().list_setups(token.as_str(), scope)?;
+    log::info!("listed {} setups (scope {scope})", setups.len());
+    Ok(setups)
+}
+
 /// Parse a `parcferme://equip?…` deep link and run the full install for the
 /// setup it names (the M3 handshake). The link only *names* a setup; the download
 /// is authorized exactly like a manual pull — this device's stored token plus the
