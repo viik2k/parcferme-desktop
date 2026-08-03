@@ -143,7 +143,7 @@ impl DownloadInfo {
 /// Car/track name lists for the upload form's pickers, returned by
 /// `GET /api/device/options?sim=…` (SERVER_CONTRACT §7a). Suggestions only:
 /// the upload endpoint re-resolves every value server-side, so a stale or
-/// partial list can never corrupt an upload. Both fields default so a server
+/// partial list can never corrupt an upload. Every field defaults so a server
 /// that predates one of the lists still parses.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SetupOptions {
@@ -151,6 +151,12 @@ pub struct SetupOptions {
     pub cars: Vec<String>,
     #[serde(default)]
     pub tracks: Vec<String>,
+    /// Valid `setups.tags` values ("safe", "aggressive", …). Sim-independent,
+    /// but served here so the form never hardcodes the site's list. Empty
+    /// against a server that predates it — show no type picker and let the
+    /// server apply its default.
+    #[serde(default, rename = "setupTypes")]
+    pub setup_types: Vec<String>,
 }
 
 /// Metadata accompanying a pushed setup file (M5). `car`/`track` are the sim's
@@ -163,6 +169,12 @@ pub struct UploadMeta<'a> {
     pub car: &'a str,
     pub track: Option<&'a str>,
     pub name: Option<&'a str>,
+    /// Setup types, a subset of [`SetupOptions::setup_types`]. Empty leaves the
+    /// param off the wire, which the server reads as its default.
+    pub types: &'a [String],
+    pub notes: Option<&'a str>,
+    /// Owner-only on the site. False matches the web form's default.
+    pub private: bool,
 }
 
 /// Successful upload: the new setup's public UUID and its page URL.
@@ -363,6 +375,15 @@ impl ApiClient {
         if let Some(name) = meta.name {
             req = req.query("name", name);
         }
+        if !meta.types.is_empty() {
+            req = req.query("types", &meta.types.join(","));
+        }
+        if let Some(notes) = meta.notes {
+            req = req.query("notes", notes);
+        }
+        if meta.private {
+            req = req.query("private", "true");
+        }
         match req.send_bytes(bytes) {
             Ok(resp) => {
                 let wire: UploadResultWire = read_json(resp)?;
@@ -534,15 +555,21 @@ mod tests {
     fn setup_options_tolerates_missing_lists() {
         // Full §7a response.
         let full: SetupOptions = serde_json::from_str(
-            r#"{ "cars": ["Ferrari 296 GT3"], "tracks": ["Spa-Francorchamps"] }"#,
+            r#"{ "cars": ["Ferrari 296 GT3"], "tracks": ["Spa-Francorchamps"], "setupTypes": ["safe", "qualifying"] }"#,
         )
         .unwrap();
         assert_eq!(full.cars, vec!["Ferrari 296 GT3".to_string()]);
         assert_eq!(full.tracks, vec!["Spa-Francorchamps".to_string()]);
+        assert_eq!(
+            full.setup_types,
+            vec!["safe".to_string(), "qualifying".to_string()]
+        );
 
         // A server that predates one list still parses, as empty.
         let partial: SetupOptions = serde_json::from_str(r#"{ "cars": [] }"#).unwrap();
-        assert!(partial.cars.is_empty() && partial.tracks.is_empty());
+        assert!(
+            partial.cars.is_empty() && partial.tracks.is_empty() && partial.setup_types.is_empty()
+        );
     }
 
     #[test]

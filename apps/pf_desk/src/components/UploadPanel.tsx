@@ -13,6 +13,9 @@ import {
 
 type Phase = "idle" | "working" | "done" | "error";
 
+/** Mirror of the server's notes cap — notes ride in the upload query string. */
+const MAX_NOTES = 5000;
+
 /**
  * Push a local setup to parcferme.cc (M5). Picking a file pre-fills sim, car
  * and track when it sits inside a sim's setups folder; every field stays
@@ -29,12 +32,16 @@ export function UploadPanel() {
   // user is told before they upload it. Cleared the moment they touch the
   // field — once they've weighed in, it isn't our guess any more.
   const [carGuessed, setCarGuessed] = useState(false);
+  const [types, setTypes] = useState<string[]>([]);
+  const [notes, setNotes] = useState("");
+  const [isPrivate, setIsPrivate] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<UploadedSetup | null>(null);
   const [error, setError] = useState<CmdError | null>(null);
   const [options, setOptions] = useState<SetupOptions>({
     cars: [],
     tracks: [],
+    setupTypes: [],
   });
 
   // Suggestions for the car/track fields, so the user picks the site's
@@ -87,6 +94,11 @@ export function UploadPanel() {
           // after picking a file would otherwise submit a hidden field.
           track: (showTrack && track.trim()) || undefined,
           name: name.trim() || undefined,
+          // Empty list omits the param, so the server applies its default
+          // rather than the app inventing one.
+          types,
+          notes: notes.trim() || undefined,
+          private: isPrivate,
         }),
       );
       setPhase("done");
@@ -218,6 +230,65 @@ export function UploadPanel() {
               placeholder="e.g. Quali — Spa 2.18,9"
               className={fieldClass}
             />
+          </label>
+
+          {/* Multi-select, matching the site's upload form. Hidden entirely on
+              a server that doesn't advertise the list — the server then tags
+              the setup itself. */}
+          {options.setupTypes.length > 0 && (
+            <div>
+              <span className="font-medium text-muted">
+                Setup type (optional, pick any)
+              </span>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {options.setupTypes.map((t) => {
+                  const on = types.includes(t);
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() =>
+                        setTypes((prev) =>
+                          on ? prev.filter((x) => x !== t) : [...prev, t],
+                        )
+                      }
+                      className={`rounded-lg px-3 py-1.5 text-xs capitalize ring-1 transition ${
+                        on
+                          ? "bg-primary text-primary-foreground ring-primary"
+                          : "text-muted ring-border hover:text-foreground"
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <label className="block">
+            <span className="font-medium text-muted">Notes (optional)</span>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              maxLength={MAX_NOTES}
+              placeholder="Tyre pressures, fuel load, anything the downloader should know."
+              className={`${fieldClass} resize-y`}
+            />
+          </label>
+
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={isPrivate}
+              onChange={(e) => setIsPrivate(e.target.checked)}
+              className="size-4 accent-primary"
+            />
+            <span className="font-medium text-muted">
+              Private — only you can see it on the site
+            </span>
           </label>
 
           <button

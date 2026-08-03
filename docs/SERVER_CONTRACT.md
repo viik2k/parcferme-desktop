@@ -198,6 +198,16 @@ a setup owned by the device token's linked user.
 | `car`      | yes      | the sim's **internal car folder id** as found on disk         |
 | `track`    | ACC, LMU | internal track folder id (see the per-sim layouts in §5)      |
 | `name`     | no       | display name typed by the user                               |
+| `types`    | no       | comma-separated setup types from §7a's `setupTypes`          |
+| `notes`    | no       | free text description, max 5000 chars                        |
+| `private`  | no       | `"true"` makes the setup owner-only; anything else is public |
+
+`types` is a **multi-select** (parc-ferme#77): `setups.tags` is an array, so
+`types=aggressive,qualifying` is one setup carrying both. Omitting it entirely
+leaves the tagging to the server (currently `["safe"]`), which is what clients
+predating this param do. An unknown value is a `422` naming the valid list —
+the server never silently drops one, since a dropped type is invisible to the
+user until they open the site.
 
 `track` is **required for ACC and LMU** — the client refuses the upload without
 one rather than sending metadata the server has to reject. For LMU the client
@@ -277,11 +287,11 @@ Errors: `401` bad/revoked token · `403` uploads not permitted for this user ·
 hint and surfaces the rest verbatim, so a JSON `{ "error": "…" }` body with a
 human-readable message is worth returning.
 
-## 7a. Picker suggestions — car/track name lists
+## 7a. Picker suggestions — car/track names and setup types
 
 The upload form offers the site's own spelling as autocomplete suggestions, so
 users pick instead of guess (the alias table above only covers known folder-id
-exceptions). One authenticated call feeds both fields:
+exceptions). One authenticated call feeds every picker:
 
 ### `GET /api/device/options?sim=<iracing|acc|lmu>`
 
@@ -292,14 +302,20 @@ Response `200`:
 
 ```jsonc
 {
-  "cars": ["Ferrari 296 GT3", "…"],      // display names, sorted
-  "tracks": ["Spa-Francorchamps", "…"]   // display names, sorted
+  "cars": ["Ferrari 296 GT3", "…"],                 // display names, sorted
+  "tracks": ["Spa-Francorchamps", "…"],             // display names, sorted
+  "setupTypes": ["safe", "aggressive", "qualifying", "endurance"]
 }
 ```
 
 - **Names only.** The client suggests; the §7 upload endpoint still resolves
   every value to a row itself (normalized equality + the folder maps), so a
   stale or partial list can never corrupt an upload.
+- `setupTypes` is the same list the website's upload form renders and is
+  sim-independent — it rides here so the client never hardcodes it. It is the
+  one list the client must *not* treat as suggestions: §7's `types` rejects
+  anything outside it. An empty or absent list means an older server; render no
+  type picker and let §7 apply its default.
 - `tracks` excludes the `"Unknown Track"` catch-all row §7 parks trackless
   iRacing uploads on — it is a parking spot, not a suggestion.
 - Errors are JSON like the rest of the device API: `400` bad sim, `401`
