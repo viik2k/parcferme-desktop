@@ -37,6 +37,8 @@ export const identifySetup = (path: string) =>
 export interface SetupOptions {
   cars: string[];
   tracks: string[];
+  /** Valid setup types ("safe", "aggressive", …). Empty on an older server. */
+  setupTypes: string[];
 }
 
 /**
@@ -46,7 +48,7 @@ export interface SetupOptions {
  */
 export const setupOptions = (sim: SimId) =>
   invoke<SetupOptions>("setup_options", { sim }).catch(
-    () => ({ cars: [], tracks: [] }) as SetupOptions,
+    () => ({ cars: [], tracks: [], setupTypes: [] }) as SetupOptions,
   );
 
 /** Push a local setup file to parcferme.cc as the linked user. */
@@ -56,4 +58,8 @@ export const uploadSetup = (args: {
   car: string;
   track?: string;
   name?: string;
+  /** Subset of `SetupOptions.setupTypes`; omit to let the server default. */
+  types?: string[];
+  notes?: string;
+  private?: boolean;
 }) => invoke<UploadedSetup>("upload_setup", args);
