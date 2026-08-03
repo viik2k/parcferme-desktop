@@ -336,6 +336,51 @@ https://github.com/viik2k/parcferme-desktop/releases/latest/download/ParcFerme-S
 resolves to the newest **published** release — drafts stay invisible, so
 publishing the draft release is the whole "ship" step.
 
+## 9. Browse endpoint — list setups from inside the app
+
+Before this, the app could *install* a setup but not *find* one: the only route
+to a team setup was open the browser, find it, click Equip. This is the shelf.
+
+### `GET /api/device/setups?scope=<mine|team>`
+
+- `Authorization: Bearer <device token>` — same resolver as §3.
+- `scope` defaults to `mine`; anything but `mine`/`team` → `400`.
+  - `mine` — setups owned by the token's user, newest-updated first
+    (`coalesce(updatedAt, createdAt)` desc).
+  - `team` — the private vaults of **every** team the user belongs to, merged,
+    most-recently-added first. Membership is re-checked server-side; a
+    non-member gets an empty list, never someone else's vault.
+
+Response `200`:
+
+```jsonc
+{
+  "items": [
+    {
+      "id": "3f2a…",                 // setup uuid — feeds §5 download verbatim
+      "name": "Quali — Spa",
+      "sim": "acc",                  // "iracing" | "acc" | "lmu"
+      "car": "Ferrari 296 GT3",      // DISPLAY names here, not folder ids
+      "track": "Spa-Francorchamps",  // null if the setup has no track
+      "updatedAt": "2026-08-01T10:22:00.000Z"
+    }
+  ]
+}
+```
+
+- **Display names, unlike §5.** This list is read by a human choosing a setup;
+  nothing here is written to disk. The `id` is all the download needs, and §5
+  still emits the folder ids that place the file.
+- **Flat and capped at 100**, newest first. No cursor, no search, no filter —
+  the client renders one scrollable list. Add pagination on both sides together
+  if a real vault outgrows it.
+- Listing grants nothing: every Install still goes through §5, which runs the
+  same `assertSetupAccess` check a browser session gets. This endpoint can only
+  ever narrow what the user already had access to.
+- Errors are JSON like the rest of the device API: `400` bad scope, `401`
+  bad/revoked token, `429` rate-limited, `500` otherwise. The client maps 401
+  to its reconnect hint and shows the rest verbatim.
+
 ## Client knobs
 
 - Base URL: `PARCFERME_API_URL` env (defaults to `https://parcferme.cc`).

@@ -260,6 +260,7 @@ pub fn run() {
             commands::open_logs_dir,
             commands::detect_sims,
             commands::download_setup,
+            commands::list_setups,
             commands::identify_setup,
             commands::setup_options,
             commands::upload_setup,

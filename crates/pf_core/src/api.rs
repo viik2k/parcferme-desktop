@@ -159,6 +159,38 @@ pub struct SetupOptions {
     pub setup_types: Vec<String>,
 }
 
+/// One row of the browse list (`GET /api/device/setups?scope=…`,
+/// SERVER_CONTRACT §9) — enough to show a shelf, plus the `id` that
+/// [`ApiClient::get_download`] installs. Every field but `id` defaults so a
+/// partially-populated row can never drop the whole list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupSummary {
+    /// The setup's public UUID — what the Install button hands to the
+    /// download path.
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    /// `"iracing" | "acc" | "lmu"`, kept raw: the UI only labels it, and the
+    /// download re-resolves the sim from the file itself.
+    #[serde(default)]
+    pub sim: Option<String>,
+    /// Display names here, not folder ids — this is shown, not written to disk.
+    #[serde(default)]
+    pub car: String,
+    #[serde(default)]
+    pub track: Option<String>,
+    #[serde(default, rename = "updatedAt")]
+    pub updated_at: Option<String>,
+}
+
+/// Wire envelope of the browse list; `items` defaults so an empty body reads
+/// as an empty shelf.
+#[derive(Debug, Default, Deserialize)]
+struct SetupListWire {
+    #[serde(default)]
+    items: Vec<SetupSummary>,
+}
+
 /// Metadata accompanying a pushed setup file (M5). `car`/`track` are the sim's
 /// internal folder ids exactly as found on the uploader's disk — the reverse of
 /// the §5 download mapping (SERVER_CONTRACT §7).
@@ -311,15 +343,7 @@ impl ApiClient {
             Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
             Err(ureq::Error::Status(403, _)) => Err(Error::AccessDenied),
             Err(ureq::Error::Status(404, _)) => Err(Error::SetupNotFound),
-            Err(ureq::Error::Status(code, resp)) => {
-                let body: ErrorBody = resp.into_json().unwrap_or_default();
-                let detail = if body.error.is_empty() {
-                    String::new()
-                } else {
-                    format!(": {}", body.error)
-                };
-                Err(Error::Api(format!("download failed (HTTP {code}){detail}")))
-            }
+            Err(ureq::Error::Status(code, resp)) => Err(api_error("download", code, resp)),
             Err(e) => Err(map_transport(e)),
         }
     }
@@ -336,17 +360,25 @@ impl ApiClient {
             .call();
         match result {
             Ok(resp) => read_json(resp),
-            Err(ureq::Error::Status(code, resp)) => {
-                let body: ErrorBody = resp.into_json().unwrap_or_default();
-                let detail = if body.error.is_empty() {
-                    String::new()
-                } else {
-                    format!(": {}", body.error)
-                };
-                Err(Error::Api(format!(
-                    "options fetch failed (HTTP {code}){detail}"
-                )))
-            }
+            Err(ureq::Error::Status(code, resp)) => Err(api_error("options fetch", code, resp)),
+            Err(e) => Err(map_transport(e)),
+        }
+    }
+
+    /// List the setups this device may install (SERVER_CONTRACT §9). `scope`
+    /// is `"mine"` or `"team"`; the server decides what each covers and
+    /// re-checks team membership, so the client never filters access itself.
+    pub fn list_setups(&self, token: &str, scope: &str) -> Result<Vec<SetupSummary>> {
+        let result = self
+            .agent
+            .get(&self.url("/api/device/setups"))
+            .query("scope", scope)
+            .set("Authorization", &format!("Bearer {token}"))
+            .call();
+        match result {
+            Ok(resp) => Ok(read_json::<SetupListWire>(resp)?.items),
+            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(ureq::Error::Status(code, resp)) => Err(api_error("setup list", code, resp)),
             Err(e) => Err(map_transport(e)),
         }
     }
@@ -401,15 +433,7 @@ impl ApiClient {
             Err(ureq::Error::Status(413, _)) => Err(Error::Api(
                 "the server rejected the file as too large".to_string(),
             )),
-            Err(ureq::Error::Status(code, resp)) => {
-                let body: ErrorBody = resp.into_json().unwrap_or_default();
-                let detail = if body.error.is_empty() {
-                    String::new()
-                } else {
-                    format!(": {}", body.error)
-                };
-                Err(Error::Api(format!("upload failed (HTTP {code}){detail}")))
-            }
+            Err(ureq::Error::Status(code, resp)) => Err(api_error("upload", code, resp)),
             Err(e) => Err(map_transport(e)),
         }
     }
@@ -451,6 +475,19 @@ fn map_token_error(code: &str) -> TokenPoll {
 
 fn map_transport(err: ureq::Error) -> Error {
     Error::Http(err.to_string())
+}
+
+/// A non-2xx from the device API as a user-facing [`Error::Api`], appending the
+/// server's `{"error": …}` message when it sent one. `what` names the operation
+/// ("download", "upload", …).
+fn api_error(what: &str, code: u16, resp: ureq::Response) -> Error {
+    let body: ErrorBody = resp.into_json().unwrap_or_default();
+    let detail = if body.error.is_empty() {
+        String::new()
+    } else {
+        format!(": {}", body.error)
+    };
+    Error::Api(format!("{what} failed (HTTP {code}){detail}"))
 }
 
 /// Parse a successful response as JSON, but fail with a *clear* message when the
@@ -570,6 +607,33 @@ mod tests {
         assert!(
             partial.cars.is_empty() && partial.tracks.is_empty() && partial.setup_types.is_empty()
         );
+    }
+
+    #[test]
+    fn setup_list_parses_and_tolerates_thin_rows() {
+        let wire: SetupListWire = serde_json::from_str(
+            r#"{ "items": [
+                { "id": "abc", "name": "Quali — Spa", "sim": "acc",
+                  "car": "Ferrari 296 GT3", "track": "Spa-Francorchamps",
+                  "updatedAt": "2026-08-01T10:22:00.000Z" },
+                { "id": "bare" }
+            ] }"#,
+        )
+        .unwrap();
+        assert_eq!(wire.items.len(), 2);
+        assert_eq!(wire.items[0].track.as_deref(), Some("Spa-Francorchamps"));
+        assert_eq!(
+            wire.items[0].updated_at.as_deref(),
+            Some("2026-08-01T10:22:00.000Z")
+        );
+        // A row carrying nothing but an id still lists — the id is all Install
+        // needs, so a thin row must not drop the whole shelf.
+        assert_eq!(wire.items[1].id, "bare");
+        assert!(wire.items[1].name.is_empty() && wire.items[1].sim.is_none());
+
+        // An empty body reads as an empty shelf, not a parse error.
+        let empty: SetupListWire = serde_json::from_str("{}").unwrap();
+        assert!(empty.items.is_empty());
     }
 
     #[test]
