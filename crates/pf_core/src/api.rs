@@ -568,9 +568,7 @@ mod tests {
         // A server that predates one list still parses, as empty.
         let partial: SetupOptions = serde_json::from_str(r#"{ "cars": [] }"#).unwrap();
         assert!(
-            partial.cars.is_empty()
-                && partial.tracks.is_empty()
-                && partial.setup_types.is_empty()
+            partial.cars.is_empty() && partial.tracks.is_empty() && partial.setup_types.is_empty()
         );
     }
 
