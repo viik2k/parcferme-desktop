@@ -378,23 +378,37 @@ pub struct UploadedSetupDto {
 /// Push a local setup file to parcferme.cc as the linked user. `sim` is the
 /// short id ("iracing" | "acc" | "lmu"); `car`/`track` are the sim's internal
 /// folder ids (pre-filled by [`identify_setup`], editable by the user).
+/// `types` come from [`setup_options`]; an empty list lets the server default.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn upload_setup(
     path: String,
     sim: String,
     car: String,
     track: Option<String>,
     name: Option<String>,
+    types: Option<Vec<String>>,
+    notes: Option<String>,
+    private: Option<bool>,
 ) -> Result<UploadedSetupDto, CmdError> {
     blocking(move || {
         let sim = Sim::from_id(&sim)
             .ok_or_else(|| CmdError::new("api", format!("unknown sim: {sim:?}")))?;
+        let types: Vec<String> = types
+            .unwrap_or_default()
+            .into_iter()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
         let result = pf_core::upload::upload_setup(
             std::path::Path::new(&path),
             sim,
             car.trim(),
             track.as_deref().map(str::trim).filter(|t| !t.is_empty()),
             name.as_deref().map(str::trim).filter(|n| !n.is_empty()),
+            &types,
+            notes.as_deref().map(str::trim).filter(|n| !n.is_empty()),
+            private.unwrap_or(false),
         )?;
         Ok(UploadedSetupDto {
             id: result.id,

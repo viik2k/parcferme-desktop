@@ -224,12 +224,21 @@ fn relative_components(path: &Path, root: &Path) -> Option<Vec<String>> {
 /// Deliberately *not* [`car_match`]: a fuzzy match is a guess, and a guess may
 /// only be made where the user can see and correct it — [`identify`], which
 /// feeds the form. Whatever the form shows at submit time is what ships.
+///
+/// `types` are the site's setup-type values (see
+/// [`crate::api::SetupOptions::setup_types`]); empty means "let the server
+/// decide", not "no types". The server validates them, so an unknown value
+/// fails the upload rather than being silently dropped.
+#[allow(clippy::too_many_arguments)]
 pub fn upload_setup(
     path: &Path,
     sim: Sim,
     car: &str,
     track: Option<&str>,
     name: Option<&str>,
+    types: &[String],
+    notes: Option<&str>,
+    private: bool,
 ) -> Result<UploadResult> {
     // File checks first — cheap, pure, and they keep obviously-bad input from
     // ever touching the keychain or the network.
@@ -277,6 +286,9 @@ pub fn upload_setup(
             car,
             track,
             name,
+            types,
+            notes,
+            private,
         },
         &bytes,
     )?;
@@ -484,13 +496,22 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         // Missing file surfaces as Io, before any network call.
-        let missing = upload_setup(&dir.join("nope.sto"), Sim::IRacing, "car", None, None);
+        let missing = upload_setup(
+            &dir.join("nope.sto"),
+            Sim::IRacing,
+            "car",
+            None,
+            None,
+            &[],
+            None,
+            false,
+        );
         assert!(matches!(missing, Err(Error::Io(_))));
 
         // Oversized file is refused client-side with a clear Api error.
         let big = dir.join("big.sto");
         std::fs::write(&big, vec![0u8; (MAX_UPLOAD_BYTES + 1) as usize]).unwrap();
-        let too_big = upload_setup(&big, Sim::IRacing, "car", None, None);
+        let too_big = upload_setup(&big, Sim::IRacing, "car", None, None, &[], None, false);
         assert!(matches!(too_big, Err(Error::Api(_))));
 
         std::fs::remove_dir_all(&dir).unwrap();
@@ -506,7 +527,16 @@ mod tests {
         // Missing and blank both fail before any keychain or network access —
         // the server would 422 with nothing the user could act on.
         for track in [None, Some("  ")] {
-            let err = upload_setup(&file, Sim::Lmu, "ferrari_499p", track, None);
+            let err = upload_setup(
+                &file,
+                Sim::Lmu,
+                "ferrari_499p",
+                track,
+                None,
+                &[],
+                None,
+                false,
+            );
             assert!(matches!(err, Err(Error::Api(m)) if m.contains("track")));
         }
 
