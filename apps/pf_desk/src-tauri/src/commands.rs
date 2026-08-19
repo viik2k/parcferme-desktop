@@ -376,17 +376,24 @@ pub async fn setup_options(sim: String) -> Result<pf_core::api::SetupOptions, Cm
     .await
 }
 
-/// The uploaded setup as shown in the success card: its id and page URL.
+/// The uploaded setup as shown in the success card: its id, page URL, and
+/// what became of the iRacing garage export if one rode along (issue #3).
 #[derive(Serialize)]
 pub struct UploadedSetupDto {
     pub id: String,
     pub url: String,
+    pub export: pf_core::upload::ExportStatus,
 }
 
 /// Push a local setup file to parcferme.cc as the linked user. `sim` is the
 /// short id ("iracing" | "acc" | "lmu"); `car`/`track` are the sim's internal
 /// folder ids (pre-filled by [`identify_setup`], editable by the user).
 /// `types` come from [`setup_options`]; an empty list lets the server default.
+///
+/// `garageExport` is the optional iRacing `.htm` export the site parses setup
+/// values from (`identify_setup` suggests one; the form lets the user drop or
+/// replace it). It never fails the upload — the outcome rides back in
+/// [`UploadedSetupDto::export`].
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn upload_setup(
@@ -398,6 +405,7 @@ pub async fn upload_setup(
     types: Option<Vec<String>>,
     notes: Option<String>,
     private: Option<bool>,
+    garage_export: Option<String>,
 ) -> Result<UploadedSetupDto, CmdError> {
     blocking(move || {
         let sim = Sim::from_id(&sim)
@@ -408,7 +416,12 @@ pub async fn upload_setup(
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
             .collect();
-        let result = pf_core::upload::upload_setup(
+        let export_path = garage_export
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(std::path::PathBuf::from);
+        let outcome = pf_core::upload::upload_setup(
             std::path::Path::new(&path),
             sim,
             car.trim(),
@@ -417,10 +430,12 @@ pub async fn upload_setup(
             &types,
             notes.as_deref().map(str::trim).filter(|n| !n.is_empty()),
             private.unwrap_or(false),
+            export_path.as_deref(),
         )?;
         Ok(UploadedSetupDto {
-            id: result.id,
-            url: result.url,
+            id: outcome.result.id,
+            url: outcome.result.url,
+            export: outcome.export,
         })
     })
     .await

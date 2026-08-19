@@ -438,6 +438,50 @@ impl ApiClient {
         }
     }
 
+    /// Attach an iRacing garage export to a setup that is already on the site
+    /// (SERVER_CONTRACT §7b).
+    ///
+    /// A second request rather than a multipart upload: `ureq` has no
+    /// multipart encoder, and keeping the export off the setup request means
+    /// an upload behaves exactly as it did before whenever there is no export
+    /// — which is every ACC and LMU upload, and every iRacing one whose owner
+    /// never ran a garage export.
+    ///
+    /// `404` is called out by name because it is what an older server returns:
+    /// the route simply isn't there yet, and telling the user their setup
+    /// uploaded but the server can't take the export is more useful than a
+    /// bare "not found".
+    pub fn upload_garage_export(
+        &self,
+        token: &str,
+        setup_uuid: &str,
+        filename: &str,
+        bytes: &[u8],
+    ) -> Result<()> {
+        let result = self
+            .agent
+            .post(&self.url(&format!("/api/device/setups/{setup_uuid}/export")))
+            .set("Authorization", &format!("Bearer {token}"))
+            .set("Content-Type", "text/html")
+            .query("filename", filename)
+            .send_bytes(bytes);
+        match result {
+            Ok(_) => Ok(()),
+            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(ureq::Error::Status(403, _)) => Err(Error::AccessDenied),
+            Err(ureq::Error::Status(404, _)) => Err(Error::Api(
+                "this server doesn't accept garage exports yet — the setup uploaded without its \
+                 values, which you can add by re-uploading it on the website"
+                    .to_string(),
+            )),
+            Err(ureq::Error::Status(413, _)) => Err(Error::Api(
+                "the server rejected the garage export as too large".to_string(),
+            )),
+            Err(ureq::Error::Status(code, resp)) => Err(api_error("garage export", code, resp)),
+            Err(e) => Err(map_transport(e)),
+        }
+    }
+
     /// Resolve a possibly-relative URL returned by the web API against this
     /// client's origin. Absolute `http(s)` URLs are returned unchanged.
     fn absolutize(&self, url: String) -> String {
