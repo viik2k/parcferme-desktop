@@ -32,6 +32,9 @@ export function UploadPanel() {
   // user is told before they upload it. Cleared the moment they touch the
   // field — once they've weighed in, it isn't our guess any more.
   const [carGuessed, setCarGuessed] = useState(false);
+  // The iRacing garage export to send alongside the .sto. Pre-filled from the
+  // sibling file when there is one; the user can drop it or pick another.
+  const [garageExport, setGarageExport] = useState<string | null>(null);
   const [types, setTypes] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
@@ -72,11 +75,22 @@ export function UploadPanel() {
       setCar(id.car ?? "");
       setCarGuessed(id.car_source === "matched");
       setTrack(id.track ?? "");
+      setGarageExport(id.garage_export);
     } catch {
       // Inference failing must not block a manual upload.
       setFilename(picked.split(/[\\/]/).pop() ?? picked);
       setCarGuessed(false);
+      setGarageExport(null);
     }
+  }
+
+  /** Pick a garage export by hand, for when the sibling guess missed. */
+  async function handlePickExport() {
+    const picked = await pickFile({
+      title: "Choose an iRacing garage export",
+      filters: [{ name: "Garage export", extensions: ["htm", "html"] }],
+    });
+    if (typeof picked === "string") setGarageExport(picked);
   }
 
   async function handleUpload() {
@@ -99,6 +113,9 @@ export function UploadPanel() {
           types,
           notes: notes.trim() || undefined,
           private: isPrivate,
+          // Same rule as `track`: only send what the form is showing, so
+          // switching sims after picking a file can't smuggle one along.
+          garageExport: (showExport && garageExport) || undefined,
         }),
       );
       setPhase("done");
@@ -115,6 +132,10 @@ export function UploadPanel() {
   // is worth avoiding when the user already knows where the lap was set.
   const layout = simLayout(sim);
   const showTrack = layout.track || sim === "iracing";
+  // iRacing only: `.sto` is binary, so the site can only read a setup's values
+  // out of the `.htm` garage export saved beside it. ACC's `.json` and LMU's
+  // `.svm` are parsed server-side and need nothing extra (issue #3).
+  const showExport = sim === "iracing";
   const canUpload =
     !!path &&
     car.trim().length > 0 &&
@@ -220,6 +241,56 @@ export function UploadPanel() {
             </label>
           )}
 
+          {showExport && (
+            <div>
+              <span className="font-medium text-muted">
+                Garage export (optional)
+              </span>
+              {/* Not a warning when it's missing: the setup uploads either way,
+                  and this only buys the setup viewer and version diff on the
+                  site. Saying what it's *for* beats nagging. */}
+              <p className="mt-1 text-[0.7rem] text-muted">
+                iRacing setup files are binary, so the site reads their values
+                from a garage export. Attach one and the setup gets a readable
+                view and version comparison.
+              </p>
+              {garageExport ? (
+                <div className="mt-1 flex items-center gap-2">
+                  <span
+                    className="flex-1 truncate rounded-lg bg-background px-3 py-2 text-foreground ring-1 ring-border"
+                    title={garageExport}
+                  >
+                    {garageExport.split(/[\\/]/).pop()}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void handlePickExport()}
+                    className="rounded-lg px-3 py-2 text-muted ring-1 ring-border transition hover:text-foreground"
+                  >
+                    Change
+                  </button>
+                  {/* The guess can be wrong, and an export for the wrong setup
+                      is worse than none — so dropping it is one click. */}
+                  <button
+                    type="button"
+                    onClick={() => setGarageExport(null)}
+                    className="rounded-lg px-3 py-2 text-muted ring-1 ring-border transition hover:text-foreground"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void handlePickExport()}
+                  className="mt-1 w-full rounded-lg px-3 py-2 text-muted ring-1 ring-border transition hover:text-foreground"
+                >
+                  Choose a garage export…
+                </button>
+              )}
+            </div>
+          )}
+
           <label className="block">
             <span className="font-medium text-muted">
               Display name (optional)
@@ -310,6 +381,20 @@ export function UploadPanel() {
           >
             {result.url}
           </button>
+          {result.export.status === "attached" && (
+            <p className="mt-1 text-xs text-success/80">
+              Garage export attached — the setup has a readable view on the
+              site.
+            </p>
+          )}
+          {/* The upload itself succeeded, so this belongs in the success card
+              rather than the error one — but it must still be visible, because
+              the setup is on the site permanently without its values. */}
+          {result.export.status === "failed" && (
+            <p className="mt-1 text-xs text-muted">
+              Uploaded without the garage export: {result.export.message}
+            </p>
+          )}
         </div>
       )}
 

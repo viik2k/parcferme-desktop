@@ -323,6 +323,84 @@ Response `200`:
 - The client caches per sim for the app's run and degrades any failure to
   empty lists (no datalist), never an error in the form.
 
+## 7b. iRacing garage export — parsed setup values (issue #3)
+
+**Status: client shipped, server route not implemented yet.** Until the route
+below exists the client uploads exactly as it did before and tells the user the
+export could not be attached (see "Older servers"). Nothing regresses.
+
+### Why
+
+The site parses an uploaded setup into `setupVersions.setupData`, which is what
+the setup viewer (parc-ferme#82) and the version diff (parc-ferme#83) render.
+It can read that straight off the file for two of the three sims:
+
+| sim     | file    | parsed from            |
+| :------ | :------ | :--------------------- |
+| LMU     | `.svm`  | the file (plain text)  |
+| ACC     | `.json` | the file               |
+| iRacing | `.sto`  | **binary** — needs a `.htm` garage export |
+
+So every iRacing setup pushed from the desktop app landed with no `setupData`
+— no viewer, no diff, permanently, unless the owner re-uploaded through the
+website with a garage export alongside.
+
+### `POST /api/device/setups/{uuid}/export`
+
+- `Authorization: Bearer <device token>` — same resolver as §3.
+- `Content-Type: text/html`, body = the raw garage export bytes (client
+  refuses files over 2 MB, the same cap as §7).
+- `filename` in the **query string**, e.g. `filename=quali_spa.htm`.
+- `{uuid}` is the setup the client just created via §7. The server must check
+  it belongs to the token's user — a device may only attach an export to its
+  own upload.
+
+A **second request** rather than multipart on §7, deliberately:
+
+- `ureq` (the client's blocking HTTP agent) has no multipart encoder, and
+  pulling one in for this would be the only reason it exists.
+- §7 stays byte-for-byte what it is today, so an upload with no export — every
+  ACC and LMU upload, and every iRacing one whose owner never ran a garage
+  export — is unchanged.
+- The export is additive. Parse it into `setupVersions.setupData` for the
+  version the §7 call created; if parsing fails, `422` with a message naming
+  what was wrong with the file.
+
+Response `200/204`: body ignored by the client.
+
+Errors: `401` bad/revoked token · `403` not this device's setup · `413` too
+large · `422` unparseable export. All JSON `{ "error": "…" }`; the client shows
+the message verbatim under the success card.
+
+### The upload never fails because of the export
+
+The setup is already created by the time this request goes out, so the client
+treats **every** outcome here as informational (`pf_core::upload::ExportStatus`):
+the upload reports success, and a failure is surfaced as "uploaded without the
+garage export: <message>". Do not expect the client to roll a setup back, and do
+not reject a §7 upload for lacking an export.
+
+### Older servers
+
+A server without this route returns `404`, which the client renders as "this
+server doesn't accept garage exports yet — the setup uploaded without its
+values, which you can add by re-uploading it on the website". That is the
+current production behaviour and it is correct; implementing the route turns it
+off by itself, with no client release.
+
+### Client behaviour (shipped)
+
+- `pf_core::upload::find_garage_export` looks for a sibling of the picked
+  `.sto` with a **matching stem** and an `.htm`/`.html` extension, both matched
+  case-insensitively (iRacing writes the export into the same folder under the
+  same name, but casing follows whatever the user typed in the garage). `.htm`
+  wins over `.html` when both exist.
+- The result rides back on `SetupIdentity.garage_export` and pre-fills the
+  form, where the user can drop it or pick a different file — the sibling match
+  is a guess, and an export belonging to the wrong setup is worse than none.
+- iRacing only. The field is not shown for ACC or LMU, and the client sends no
+  export for them.
+
 ## 8. Release download (website "Download the app" button)
 
 CI attaches **stable-named** installers to every `v*` GitHub Release alongside

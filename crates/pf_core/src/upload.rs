@@ -8,7 +8,7 @@
 //! inferred is a *suggestion* the UI lets the user correct before uploading;
 //! the server is the final authority on metadata.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -39,6 +39,12 @@ pub struct SetupIdentity {
     /// How [`car`](Self::car) was arrived at, so the form can mark a guess as
     /// one. `Folder` whenever there is no car at all.
     pub car_source: CarSource,
+    /// Path to an iRacing garage export (`.htm`/`.html`) found beside the
+    /// picked `.sto`, if any — see [`find_garage_export`]. `None` for every
+    /// other sim, and whenever no sibling export exists. A suggestion like the
+    /// rest of this struct: the form shows it and lets the user drop or
+    /// replace it.
+    pub garage_export: Option<String>,
 }
 
 /// Where a pre-filled car name came from. Only [`CarSource::Matched`] is a
@@ -110,13 +116,82 @@ pub fn identify_with_cars(
         }
         (_, car) => (car, CarSource::Folder),
     };
+    let garage_export = sim
+        .and_then(|sim| find_garage_export(path, sim))
+        .map(|p| p.to_string_lossy().into_owned());
     SetupIdentity {
         filename,
         sim,
         car,
         track,
         car_source,
+        garage_export,
     }
+}
+
+/// The iRacing garage export sitting beside `path`, if there is one.
+///
+/// `.sto` is binary, so the site can only read an iRacing setup's values from
+/// the `.htm` garage export saved alongside it (SERVER_CONTRACT §7b). iRacing
+/// writes that export into the same folder under the same name, so a sibling
+/// with a matching stem and an `.htm`/`.html` extension is the export for this
+/// setup.
+///
+/// Matching is **case-insensitive on both stem and extension** and goes through
+/// `read_dir` rather than probing `<stem>.htm` directly: exports come back from
+/// the sim with whatever casing the user typed into the garage, and Windows
+/// would resolve a probe case-insensitively while the tests (and any Linux CI
+/// run) would not.
+///
+/// Returns `None` for anything but iRacing, and for an unreadable folder — a
+/// missing export is the normal case, never an error, since the upload must
+/// still go through without one.
+pub fn find_garage_export(path: &Path, sim: Sim) -> Option<PathBuf> {
+    if sim != Sim::IRacing {
+        return None;
+    }
+    let stem = path.file_stem()?.to_string_lossy().into_owned();
+    let dir = path.parent()?;
+
+    let mut found: Option<PathBuf> = None;
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        // A *folder* named `quali.htm` would otherwise match and then fail to
+        // read at upload time, reporting a failure where there was no export.
+        if !entry.file_type().is_ok_and(|t| t.is_file()) {
+            continue;
+        }
+        let candidate = entry.path();
+        let matches_stem = candidate
+            .file_stem()
+            .is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case(&stem));
+        let ext = candidate
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        if !matches_stem || !matches!(ext.as_str(), "htm" | "html") {
+            continue;
+        }
+        // `.htm` is what iRacing itself writes; prefer it when a hand-saved
+        // `.html` sits next to one, and keep the result independent of the
+        // order `read_dir` happens to hand entries back in.
+        let beats_current = found
+            .as_ref()
+            .and_then(|f| {
+                f.extension()
+                    .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            })
+            .is_none_or(|current| ext == "htm" && current != "htm");
+        if found.is_none() || beats_current {
+            found = Some(candidate);
+        }
+    }
+    if let Some(export) = &found {
+        log::info!(
+            "found garage export {:?} beside {stem}.sto",
+            export.file_name()
+        );
+    }
+    found
 }
 
 /// The site's name for an on-disk car folder id, and how confident we are.
@@ -214,6 +289,33 @@ fn relative_components(path: &Path, root: &Path) -> Option<Vec<String>> {
     under.then(|| parts[root_parts.len()..].to_vec())
 }
 
+/// What became of the garage export that rode along with an upload.
+///
+/// Its own field rather than an error, because attaching the export is
+/// **never** allowed to fail the upload: the setup is on the site either way
+/// (SERVER_CONTRACT §7b), and the user only needs to know whether the site got
+/// the values it needs for the viewer and the diff.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", content = "message", rename_all = "snake_case")]
+pub enum ExportStatus {
+    /// No export was sent — none was found, or the user dropped it. The
+    /// ordinary case for ACC and LMU, whose files the site parses directly.
+    NotSent,
+    /// The site accepted the export; the setup has parsed data.
+    Attached,
+    /// The upload succeeded and the export did not. `message` is user-facing;
+    /// re-uploading through the website is the recovery.
+    Failed(String),
+}
+
+/// A completed upload: the setup the server created, plus whether its garage
+/// export made it across.
+#[derive(Debug, Clone)]
+pub struct UploadOutcome {
+    pub result: UploadResult,
+    pub export: ExportStatus,
+}
+
 /// Push one setup file to parcferme.cc as this device's linked user.
 ///
 /// `car`/`track` should be the sim's internal folder ids (exactly what
@@ -229,6 +331,13 @@ fn relative_components(path: &Path, root: &Path) -> Option<Vec<String>> {
 /// [`crate::api::SetupOptions::setup_types`]); empty means "let the server
 /// decide", not "no types". The server validates them, so an unknown value
 /// fails the upload rather than being silently dropped.
+///
+/// `garage_export` is the optional iRacing `.htm` export whose values the site
+/// parses into `setupVersions.setupData` — a `.sto` is binary and yields none
+/// on its own. It is pushed **after** the setup, in a second request, and a
+/// failure there is reported in [`UploadOutcome::export`] rather than raised:
+/// an upload that already succeeded must not surface as an error, and a setup
+/// with no export must still upload exactly as it did before (issue #3).
 #[allow(clippy::too_many_arguments)]
 pub fn upload_setup(
     path: &Path,
@@ -239,7 +348,8 @@ pub fn upload_setup(
     types: &[String],
     notes: Option<&str>,
     private: bool,
-) -> Result<UploadResult> {
+    garage_export: Option<&Path>,
+) -> Result<UploadOutcome> {
     // File checks first — cheap, pure, and they keep obviously-bad input from
     // ever touching the keychain or the network.
     let filename = path
@@ -278,7 +388,8 @@ pub fn upload_setup(
         bytes.len(),
         sim.id()
     );
-    let result = ApiClient::from_env().upload_setup(
+    let client = ApiClient::from_env();
+    let result = client.upload_setup(
         token.as_str(),
         &UploadMeta {
             filename: &filename,
@@ -293,7 +404,52 @@ pub fn upload_setup(
         &bytes,
     )?;
     log::info!("uploaded {filename} as setup {}", result.id);
-    Ok(result)
+
+    let export = match garage_export {
+        Some(export) => attach_garage_export(&client, token.as_str(), &result.id, export),
+        None => ExportStatus::NotSent,
+    };
+    Ok(UploadOutcome { result, export })
+}
+
+/// Push the garage export for a setup that is already on the site.
+///
+/// Every failure — unreadable file, oversized, server refusal, an older server
+/// with no §7b route at all — comes back as [`ExportStatus::Failed`] carrying a
+/// message the user can act on. Nothing here may return `Err`: the setup it
+/// belongs to has already uploaded.
+fn attach_garage_export(
+    client: &ApiClient,
+    token: &str,
+    setup_id: &str,
+    export: &Path,
+) -> ExportStatus {
+    let filename = match export.file_name() {
+        Some(f) => f.to_string_lossy().into_owned(),
+        None => return ExportStatus::Failed(format!("not a file: {}", export.display())),
+    };
+    let bytes = match std::fs::read(export) {
+        Ok(bytes) if bytes.len() as u64 > MAX_UPLOAD_BYTES => {
+            return ExportStatus::Failed(format!(
+                "{filename} is {} bytes — too large for a garage export (limit {MAX_UPLOAD_BYTES})",
+                bytes.len()
+            ))
+        }
+        Ok(bytes) => bytes,
+        Err(e) => return ExportStatus::Failed(format!("could not read {filename}: {e}")),
+    };
+    match client.upload_garage_export(token, setup_id, &filename, &bytes) {
+        Ok(()) => {
+            log::info!("attached garage export {filename} to setup {setup_id}");
+            ExportStatus::Attached
+        }
+        Err(e) => {
+            // Warn, don't error: the setup is on the site, only its parsed
+            // values are missing, and the message says how to recover.
+            log::warn!("garage export {filename} not attached to setup {setup_id}: {e}");
+            ExportStatus::Failed(e.to_string())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -491,6 +647,71 @@ mod tests {
     }
 
     #[test]
+    fn identify_finds_the_garage_export_beside_an_iracing_setup() {
+        let root = scratch("export");
+        let car = root.join("ferrari296gt3");
+        std::fs::create_dir_all(&car).unwrap();
+        let settings = scratch_settings(&root);
+
+        let sto = car.join("quali.sto");
+        std::fs::write(&sto, b"\0binary").unwrap();
+
+        // No export yet: the field is empty and the upload is unaffected.
+        assert_eq!(identify_offline(&sto, &settings).garage_export, None);
+
+        // iRacing writes the export next to the setup under the same name.
+        let htm = car.join("quali.htm");
+        std::fs::write(&htm, b"<html>").unwrap();
+        assert_eq!(
+            identify_offline(&sto, &settings).garage_export,
+            Some(htm.to_string_lossy().into_owned())
+        );
+
+        // A same-stem file that isn't an export is not one…
+        std::fs::write(car.join("quali.txt"), b"notes").unwrap();
+        // …and neither is an export belonging to a different setup.
+        std::fs::write(car.join("race.htm"), b"<html>").unwrap();
+        assert_eq!(
+            identify_offline(&sto, &settings).garage_export,
+            Some(htm.to_string_lossy().into_owned())
+        );
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn garage_export_matching_ignores_case_and_prefers_htm() {
+        let dir = scratch("export-case");
+        std::fs::create_dir_all(&dir).unwrap();
+        let sto = dir.join("Quali_Spa.sto");
+        std::fs::write(&sto, b"\0binary").unwrap();
+
+        // The garage names the export; the file picker names the setup. The
+        // two casings need not agree, and on Windows they routinely don't.
+        let html = dir.join("quali_spa.HTML");
+        std::fs::write(&html, b"<html>").unwrap();
+        assert_eq!(find_garage_export(&sto, Sim::IRacing), Some(html.clone()));
+
+        // `.htm` is what iRacing itself writes, so it wins over a hand-saved
+        // `.html` regardless of the order read_dir returns them in.
+        let htm = dir.join("QUALI_SPA.htm");
+        std::fs::write(&htm, b"<html>").unwrap();
+        assert_eq!(find_garage_export(&sto, Sim::IRacing), Some(htm));
+
+        // Only iRacing has this problem — ACC and LMU files parse server-side.
+        assert_eq!(find_garage_export(&sto, Sim::Acc), None);
+        assert_eq!(find_garage_export(&sto, Sim::Lmu), None);
+
+        // A folder that isn't there is a missing export, not an error.
+        assert_eq!(
+            find_garage_export(&scratch("gone").join("q.sto"), Sim::IRacing),
+            None
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn upload_rejects_oversized_and_missing_files() {
         let dir = scratch("reject");
         std::fs::create_dir_all(&dir).unwrap();
@@ -505,13 +726,24 @@ mod tests {
             &[],
             None,
             false,
+            None,
         );
         assert!(matches!(missing, Err(Error::Io(_))));
 
         // Oversized file is refused client-side with a clear Api error.
         let big = dir.join("big.sto");
         std::fs::write(&big, vec![0u8; (MAX_UPLOAD_BYTES + 1) as usize]).unwrap();
-        let too_big = upload_setup(&big, Sim::IRacing, "car", None, None, &[], None, false);
+        let too_big = upload_setup(
+            &big,
+            Sim::IRacing,
+            "car",
+            None,
+            None,
+            &[],
+            None,
+            false,
+            None,
+        );
         assert!(matches!(too_big, Err(Error::Api(_))));
 
         std::fs::remove_dir_all(&dir).unwrap();
@@ -536,6 +768,7 @@ mod tests {
                 &[],
                 None,
                 false,
+                None,
             );
             assert!(matches!(err, Err(Error::Api(m)) if m.contains("track")));
         }
