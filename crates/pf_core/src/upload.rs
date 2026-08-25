@@ -428,13 +428,19 @@ fn attach_garage_export(
         Some(f) => f.to_string_lossy().into_owned(),
         None => return ExportStatus::Failed(format!("not a file: {}", export.display())),
     };
+    // Size-check *before* reading, exactly like the §7 path (upload_setup):
+    // a huge file is rejected on its metadata alone instead of being read
+    // fully into memory just to be thrown away.
+    let size = match std::fs::metadata(export) {
+        Ok(m) => m.len(),
+        Err(e) => return ExportStatus::Failed(format!("could not read {filename}: {e}")),
+    };
+    if size > MAX_UPLOAD_BYTES {
+        return ExportStatus::Failed(format!(
+            "{filename} is {size} bytes — too large for a garage export (limit {MAX_UPLOAD_BYTES})"
+        ));
+    }
     let bytes = match std::fs::read(export) {
-        Ok(bytes) if bytes.len() as u64 > MAX_UPLOAD_BYTES => {
-            return ExportStatus::Failed(format!(
-                "{filename} is {} bytes — too large for a garage export (limit {MAX_UPLOAD_BYTES})",
-                bytes.len()
-            ))
-        }
         Ok(bytes) => bytes,
         Err(e) => return ExportStatus::Failed(format!("could not read {filename}: {e}")),
     };
@@ -772,6 +778,30 @@ mod tests {
             );
             assert!(matches!(err, Err(Error::Api(m)) if m.contains("track")));
         }
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn oversized_garage_export_is_rejected_before_any_network_call() {
+        let dir = scratch("big-export");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let big = dir.join("big.htm");
+        std::fs::write(&big, vec![0u8; (MAX_UPLOAD_BYTES + 1) as usize]).unwrap();
+
+        // A client aimed at a non-routable port proves the size cap fires on the
+        // file's metadata alone — read fully into memory or sent over the wire,
+        // this would hang/fail as a transport error instead of the clean
+        // "too large" refusal.
+        let client = ApiClient::new("http://127.0.0.1:1/");
+        let status = attach_garage_export(&client, "token", "setup-1", &big);
+        assert!(matches!(
+            status,
+            ExportStatus::Failed(m)
+                if m.contains("too large")
+                    && m.contains(&format!("limit {MAX_UPLOAD_BYTES}"))
+        ));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
