@@ -109,7 +109,9 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
       <div className="mt-5 space-y-2">
         <p className="text-xs font-medium text-muted">Setup folders</p>
         {sims === null ? (
-          <p className="text-xs text-muted">Detecting…</p>
+          <p className="text-xs text-muted">
+            <span className="pf-dance mr-1.5" aria-hidden="true" />Detecting…
+          </p>
         ) : (
           sims.map((s) => (
             <div

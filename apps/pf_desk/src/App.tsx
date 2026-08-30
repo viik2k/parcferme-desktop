@@ -5,6 +5,7 @@ import logo from "./assets/logo.png";
 import { ConnectPanel } from "./components/ConnectPanel";
 import { Connected } from "./components/Connected";
 import { DownloadPanel } from "./components/DownloadPanel";
+import { OrganicLoader } from "./components/OrganicLoader";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SetupsPanel } from "./components/SetupsPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -155,7 +156,10 @@ function App() {
         {view === "settings" ? (
           <SettingsPanel onBack={() => setView("home")} />
         ) : linked === null ? (
-          <p className="text-center text-sm text-muted">Checking…</p>
+          <div className="flex flex-col items-center gap-2 py-8 text-muted">
+            <OrganicLoader size={64} label="Checking sign-in" />
+            <p className="text-sm">Checking…</p>
+          </div>
         ) : linked ? (
           <div className="flex flex-col gap-6">
             <Connected

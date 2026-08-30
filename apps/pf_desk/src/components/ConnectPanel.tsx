@@ -120,7 +120,7 @@ export function ConnectPanel({
           </button>
           <p className="mt-3 flex items-center justify-center gap-2 text-xs text-muted">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-            Waiting for approval…
+            <span className="pf-dance mr-1.5" aria-hidden="true" />Waiting for approval…
           </p>
         </div>
       ) : (
@@ -129,7 +129,13 @@ export function ConnectPanel({
           disabled={phase === "starting"}
           className="mt-5 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {phase === "starting" ? "Requesting code…" : "Connect account"}
+          {phase === "starting" ? (
+          <>
+            <span className="pf-dance mr-1.5" aria-hidden="true" />Requesting code…
+          </>
+        ) : (
+          "Connect account"
+        )}
         </button>
       )}
 

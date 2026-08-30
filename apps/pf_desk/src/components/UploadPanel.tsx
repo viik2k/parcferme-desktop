@@ -367,7 +367,13 @@ export function UploadPanel() {
             disabled={!canUpload}
             className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {phase === "working" ? "Uploading…" : "Upload to Parc Fermé"}
+            {phase === "working" ? (
+              <>
+                <span className="pf-dance mr-1.5" aria-hidden="true" />Uploading…
+              </>
+            ) : (
+              "Upload to Parc Fermé"
+            )}
           </button>
         </div>
       )}
