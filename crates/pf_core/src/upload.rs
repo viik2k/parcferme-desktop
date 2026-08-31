@@ -428,13 +428,19 @@ fn attach_garage_export(
         Some(f) => f.to_string_lossy().into_owned(),
         None => return ExportStatus::Failed(format!("not a file: {}", export.display())),
     };
+    // Size-check *before* reading, exactly like the §7 path (upload_setup):
+    // a huge file is rejected on its metadata alone instead of being read
+    // fully into memory just to be thrown away.
+    let size = match std::fs::metadata(export) {
+        Ok(m) => m.len(),
+        Err(e) => return ExportStatus::Failed(format!("could not read {filename}: {e}")),
+    };
+    if size > MAX_UPLOAD_BYTES {
+        return ExportStatus::Failed(format!(
+            "{filename} is {size} bytes — too large for a garage export (limit {MAX_UPLOAD_BYTES})"
+        ));
+    }
     let bytes = match std::fs::read(export) {
-        Ok(bytes) if bytes.len() as u64 > MAX_UPLOAD_BYTES => {
-            return ExportStatus::Failed(format!(
-                "{filename} is {} bytes — too large for a garage export (limit {MAX_UPLOAD_BYTES})",
-                bytes.len()
-            ))
-        }
         Ok(bytes) => bytes,
         Err(e) => return ExportStatus::Failed(format!("could not read {filename}: {e}")),
     };
@@ -609,7 +615,12 @@ mod tests {
         let settings = scratch_settings(&root);
 
         // Recognized format but foreign location: sim yes, car/track no.
-        let desktop = identify_offline(Path::new(r"C:\Users\x\Desktop\q.json"), &settings);
+        // Host-shaped (built with join under temp_dir, in a sibling of the
+        // scratch root) so the "outside the sim tree" bit is real on every
+        // platform — a hardcoded Windows literal would be a single opaque
+        // component on Unix and prove nothing.
+        let foreign_root = std::env::temp_dir().join("pf-upload-foreign-sibling");
+        let desktop = identify_offline(&foreign_root.join("Desktop").join("q.json"), &settings);
         assert_eq!(desktop.sim, Some(Sim::Acc));
         assert_eq!(desktop.car, None);
         assert_eq!(desktop.track, None);
@@ -625,6 +636,13 @@ mod tests {
         assert_eq!(zip.filename, "pack.zip");
     }
 
+    /// The whole thing — case folding *and* separator handling. Separator
+    /// handling is a compile-time property of `Path::components`, so this test
+    /// can only pass on Windows (where `C:\` is a `Prefix` and `\` and `/`
+    /// both split); on Unix a literal `C:\Steam\…` is a single opaque
+    /// component and the assertion can't hold. Kept in CI (which is
+    /// Windows-only) alongside the crate's other Windows behaviour tests.
+    #[cfg(windows)]
     #[test]
     fn root_matching_ignores_case_and_separators() {
         // LMU's root comes from Steam's registry value (`c:/program files…`)
@@ -644,6 +662,33 @@ mod tests {
         );
         // …and the root itself has no components below it.
         assert_eq!(relative_components(root, root), None);
+    }
+
+    /// The case-folding half of `relative_components` (`eq_ignore_ascii_case`)
+    /// is the function's own doing and holds on any host, so Linux `cargo test`
+    /// still guards it. Paths are built with `join` so the host splits them the
+    /// way the app actually sees them; only separator handling is a Windows
+    /// compile-time property, covered by the `#[cfg(windows)]` sibling above.
+    #[test]
+    fn root_matching_folds_ascii_case_on_any_host() {
+        // `USERDATA` differs from `UserData` only in case — a literal
+        // strip_prefix would miss it, `relative_components` must not.
+        let root = PathBuf::from("Install").join("Steam/Common/Le Mans Ultimate/UserData");
+        let picked = PathBuf::from("Install")
+            .join("Steam/Common/Le Mans Ultimate/USERDATA")
+            .join("Fuji/q.svm");
+        assert_eq!(
+            relative_components(&picked, &root),
+            Some(vec!["Fuji".to_string(), "q.svm".to_string()])
+        );
+
+        // A genuinely different tree still doesn't match…
+        assert_eq!(
+            relative_components(&PathBuf::from("Install").join("Elsewhere/q.svm"), &root),
+            None
+        );
+        // …and the root itself has no components below it.
+        assert_eq!(relative_components(&root, &root), None);
     }
 
     #[test]
@@ -772,6 +817,30 @@ mod tests {
             );
             assert!(matches!(err, Err(Error::Api(m)) if m.contains("track")));
         }
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn oversized_garage_export_is_rejected_before_any_network_call() {
+        let dir = scratch("big-export");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let big = dir.join("big.htm");
+        std::fs::write(&big, vec![0u8; (MAX_UPLOAD_BYTES + 1) as usize]).unwrap();
+
+        // A client aimed at a non-routable port proves the size cap fires on the
+        // file's metadata alone — read fully into memory or sent over the wire,
+        // this would hang/fail as a transport error instead of the clean
+        // "too large" refusal.
+        let client = ApiClient::new("http://127.0.0.1:1/");
+        let status = attach_garage_export(&client, "token", "setup-1", &big);
+        assert!(matches!(
+            status,
+            ExportStatus::Failed(m)
+                if m.contains("too large")
+                    && m.contains(&format!("limit {MAX_UPLOAD_BYTES}"))
+        ));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

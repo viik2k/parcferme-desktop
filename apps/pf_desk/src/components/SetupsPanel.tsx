@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { downloadSetup } from "../lib/download";
+import { OrganicLoader } from "./OrganicLoader";
 import { errorHint, toCmdError, type CmdError } from "../lib/errors";
 import { listSetups, type Scope, type SetupSummary } from "../lib/setups";
 import { simLabel } from "../lib/sims";
@@ -89,7 +90,9 @@ export function SetupsPanel() {
           )}
         </div>
       ) : items === null ? (
-        <p className="mt-4 text-sm text-muted">Loading…</p>
+        <div className="mt-4 flex justify-center py-6 text-muted">
+          <OrganicLoader size={56} label="Loading setups" />
+        </div>
       ) : items.length === 0 ? (
         <p className="mt-4 text-sm text-muted">
           {scope === "team"
@@ -127,7 +130,13 @@ export function SetupsPanel() {
                   disabled={state === "installing"}
                   className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {state === "installing" ? "Installing…" : "Install"}
+                  {state === "installing" ? (
+                    <>
+                      <span className="pf-dance mr-1.5" aria-hidden="true" />Installing…
+                    </>
+                  ) : (
+                    "Install"
+                  )}
                 </button>
               </li>
             );

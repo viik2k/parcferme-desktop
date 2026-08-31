@@ -24,3 +24,101 @@ body {
   background-color: var(--color-background);
   color: var(--color-foreground);
 }
+
+/* Organic loader (src/components/OrganicLoader.tsx), ported from the web app. */
+.lo-dot {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: lo-dot-scale 1.4s ease-in-out infinite;
+}
+@keyframes lo-dot-scale {
+  0%,
+  100% {
+    transform: scale(0.7);
+  }
+  50% {
+    transform: scale(1.25);
+  }
+}
+
+.lo-nuc {
+  transform-origin: 100px 100px;
+  animation: lo-nuc-pulse 2.6s ease-in-out infinite;
+}
+@keyframes lo-nuc-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+
+.lo-sat {
+  transform-origin: 100px 100px;
+  animation: lo-sat-orbit 2.6s ease-in-out infinite;
+}
+@keyframes lo-sat-orbit {
+  0%,
+  100% {
+    transform: rotate(0deg) translateX(60px) scale(1);
+  }
+  50% {
+    transform: rotate(180deg) translateX(0) scale(0.3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lo-dot,
+  .lo-nuc,
+  .lo-sat {
+    animation-duration: 0s;
+  }
+}
+
+/* Dancing glyph spinner, the one Claude Code cycles in the terminal. Pure CSS:
+   WebView2 is Chromium, which animates `content`. */
+.pf-dance::before {
+  content: "✻";
+  display: inline-block;
+  animation: pf-dance 1s steps(1) infinite;
+}
+@keyframes pf-dance {
+  0% {
+    content: "·";
+  }
+  10% {
+    content: "✢";
+  }
+  20% {
+    content: "✳";
+  }
+  30% {
+    content: "∗";
+  }
+  40% {
+    content: "✻";
+  }
+  50% {
+    content: "✽";
+  }
+  60% {
+    content: "✻";
+  }
+  70% {
+    content: "∗";
+  }
+  80% {
+    content: "✳";
+  }
+  90% {
+    content: "✢";
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-dance::before {
+    animation-duration: 0s;
+  }
+}

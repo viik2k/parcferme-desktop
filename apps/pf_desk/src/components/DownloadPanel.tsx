@@ -60,7 +60,13 @@ export function DownloadPanel({ onOpenSettings }: { onOpenSettings: () => void }
         disabled={!canDownload}
         className="mt-3 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {phase === "working" ? "Downloading…" : "Download"}
+        {phase === "working" ? (
+          <>
+            <span className="pf-dance mr-1.5" aria-hidden="true" />Downloading…
+          </>
+        ) : (
+          "Download"
+        )}
       </button>
 
       {phase === "done" && result && (

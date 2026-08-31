@@ -325,9 +325,11 @@ Response `200`:
 
 ## 7b. iRacing garage export — parsed setup values (issue #3)
 
-**Status: client shipped, server route not implemented yet.** Until the route
-below exists the client uploads exactly as it did before and tells the user the
-export could not be attached (see "Older servers"). Nothing regresses.
+**Status: shipped on both sides.** The client landed in v0.2.6; the server route
+landed in parc-ferme#101 (`8a8a5f1`, merged to `main` in parc-ferme#103), so an
+iRacing setup uploaded from the app with its garage export now gets `setupData`
+without a re-upload through the website. A server predating the route still
+degrades cleanly (see "Older servers").
 
 ### Why
 
@@ -369,8 +371,16 @@ A **second request** rather than multipart on §7, deliberately:
 Response `200/204`: body ignored by the client.
 
 Errors: `401` bad/revoked token · `403` not this device's setup · `413` too
-large · `422` unparseable export. All JSON `{ "error": "…" }`; the client shows
-the message verbatim under the success card.
+large · `422` unparseable export · `429` rate-limited. All JSON
+`{ "error": "…" }`; the client shows the message verbatim under the success
+card.
+
+`422` covers three separate refusals server-side, each with its own message: the
+setup's sim does not take a garage export at all, the body does not look like
+one (sniffed by shape, not by the `filename` or the route it arrived on), or the
+parse yielded no values. The server writes nothing in any of those cases —
+blanking a version that already had values is the outcome the checks exist to
+avoid.
 
 ### The upload never fails because of the export
 
@@ -384,9 +394,9 @@ not reject a §7 upload for lacking an export.
 
 A server without this route returns `404`, which the client renders as "this
 server doesn't accept garage exports yet — the setup uploaded without its
-values, which you can add by re-uploading it on the website". That is the
-current production behaviour and it is correct; implementing the route turns it
-off by itself, with no client release.
+values, which you can add by re-uploading it on the website". Production now
+implements the route, so this path only applies to a self-hosted or pinned
+server older than parc-ferme#101. The route turning on needed no client release.
 
 ### Client behaviour (shipped)
 
