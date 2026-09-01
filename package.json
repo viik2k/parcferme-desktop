@@ -1,6 +1,6 @@
 {
   "name": "parcferme-desktop",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "private": true,
   "description": "ParcFerme desktop tray client — Tauri (Rust core + web UI)",
   "packageManager": "pnpm@11.8.0",
