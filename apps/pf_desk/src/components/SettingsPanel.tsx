@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { detectSims, type SimFolder } from "../lib/download";
 import { toCmdError } from "../lib/errors";
 import {
@@ -241,6 +242,28 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
           Logs contain no tokens or personal data — safe to attach to a bug
           report.
         </p>
+      </div>
+
+      {/* Legal — the site's policy covers this app (its section on the
+          desktop application describes exactly what it reads and sends). */}
+      <div className="mt-5 flex items-center gap-3 text-[10px] text-muted/80">
+        <button
+          onClick={() =>
+            void openUrl("https://parcferme.cc/privacy").catch(() => undefined)
+          }
+          className="underline-offset-2 transition hover:text-foreground hover:underline"
+        >
+          Privacy Policy
+        </button>
+        <span aria-hidden="true">·</span>
+        <button
+          onClick={() =>
+            void openUrl("https://parcferme.cc/tos").catch(() => undefined)
+          }
+          className="underline-offset-2 transition hover:text-foreground hover:underline"
+        >
+          Terms of Service
+        </button>
       </div>
 
       {error && (
