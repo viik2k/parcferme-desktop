@@ -85,6 +85,15 @@ then applies unchanged.
 `list` (id, name, lastUsedAt, createdAt) and `revoke(id)` (set `revokedAt`).
 Surfaces trust + revocation; also a visible Pro-tier surface later.
 
+Self-service account deletion (parc-ferme#107, `account.deleteAccount`)
+deletes the user's `deviceTokens` and `deviceAuthRequests` rows outright. The
+client needs nothing new for it: the next authenticated call gets a `401`,
+which is already `Error::DeviceRevoked` and the "sign out, then connect
+again" hint. The cached profile in the keychain is the user's own data on
+their own machine and is cleared by Sign out. The site's `/privacy` page
+describes this app's local reads and network calls (§3e there); keep it in
+step when the client gains a new one.
+
 ## 5. M2 download endpoint (next milestone, listed for continuity)
 
 `getDownloadUrl(versionId)` honoring the device token: resolve token → userId,
