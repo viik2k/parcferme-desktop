@@ -15,6 +15,7 @@ mod error;
 pub mod lmu;
 pub mod options;
 pub mod paths;
+pub mod session;
 pub mod settings;
 pub mod sim;
 pub mod upload;

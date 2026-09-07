@@ -7,13 +7,19 @@
 //! Errors cross the boundary as [`CmdError`] `{ kind, message }` so the UI can
 //! attach a per-kind hint (M4 unhappy paths) instead of parsing strings.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
 use serde::Serialize;
 use tauri::async_runtime::spawn_blocking;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use pf_core::api::{ApiClient, DeviceUser};
 use pf_core::auth::{self, DeviceFlow, FlowOutcome};
 use pf_core::download::{self, InstallAction};
+use pf_core::lmu::{Config as LmuConfig, Lmu};
+use pf_core::session;
 use pf_core::settings::Settings;
 use pf_core::sim::Sim;
 
@@ -472,4 +478,183 @@ pub fn run_equip(url: &str) -> EquipOutcome {
             message: e.to_string(),
         },
     }
+}
+
+// ---------------------------------------------------------------------------
+// Live telemetry (LMU)
+// ---------------------------------------------------------------------------
+
+/// Event carrying one merged [`pf_core::lmu::Frame`] to the dash window.
+pub const FRAME_EVENT: &str = "telemetry-frame";
+/// Emitted when the source stops on its own — the game exited.
+pub const TELEMETRY_ENDED_EVENT: &str = "telemetry-ended";
+
+/// Managed state: the stop flag of the running pump, if one is running.
+/// `None` means no source is open.
+#[derive(Default)]
+pub struct Telemetry(Mutex<Option<Arc<AtomicBool>>>);
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TelemetryStatus {
+    pub running: bool,
+    /// File name of the session being recorded, if recording.
+    pub recording: Option<String>,
+}
+
+/// Open the LMU source and stream frames to the UI as `telemetry-frame`.
+///
+/// Idempotent: calling it while a source is already open is a no-op that
+/// reports the current status (React re-mounts the dash in dev, and the tray
+/// must not be able to open two readers against the game's lock).
+///
+/// Not `async`: [`Lmu::start`] only opens the shared-memory mapping and spawns
+/// its own threads, and it must fail *here* — "the game isn't running" is the
+/// answer the button is waiting for.
+#[tauri::command]
+pub fn telemetry_start(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Telemetry>,
+    record: bool,
+) -> Result<TelemetryStatus, CmdError> {
+    let mut slot = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.is_some() {
+        return Ok(TelemetryStatus {
+            running: true,
+            recording: None,
+        });
+    }
+
+    let source = Lmu::start(LmuConfig::default())?;
+    let mut recorder = if record {
+        Some(session::Recorder::create()?)
+    } else {
+        None
+    };
+    let recording = recorder.as_ref().map(|r| {
+        r.path()
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
+    });
+
+    let stop = Arc::new(AtomicBool::new(false));
+    *slot = Some(Arc::clone(&stop));
+    drop(slot);
+
+    log::info!("telemetry started (recording: {recording:?})");
+    std::thread::Builder::new()
+        .name("pf-telemetry".into())
+        .spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                match source.next_frame_timeout(Duration::from_millis(250)) {
+                    Some(frame) => {
+                        if let Some(rec) = recorder.as_mut() {
+                            if let Err(e) = rec.write(&frame) {
+                                // Losing the recording must not cost the driver
+                                // the live dash: drop to live-only and say so.
+                                log::warn!("recording stopped: {e}");
+                                recorder = None;
+                            }
+                        }
+                        let _ = app.emit(FRAME_EVENT, &frame);
+                    }
+                    // Empty poll: a quiet session and a dead source look the
+                    // same here, but a dead one returns instantly — without
+                    // this check the loop would spin.
+                    None if !source.is_running() => break,
+                    None => {}
+                }
+            }
+            if let Some(rec) = recorder {
+                log::info!(
+                    "recorded {} frames to {}",
+                    rec.frames(),
+                    rec.path().display()
+                );
+            }
+            // Clear the slot whichever way the loop ended, so the next start
+            // isn't refused by a stale flag.
+            let state = app.state::<Telemetry>();
+            *state.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            let _ = app.emit(TELEMETRY_ENDED_EVENT, ());
+            log::info!("telemetry stopped");
+        })
+        .map_err(|e| CmdError::new("internal", e.to_string()))?;
+
+    Ok(TelemetryStatus {
+        running: true,
+        recording,
+    })
+}
+
+/// Stop the source. Safe to call when nothing is running.
+#[tauri::command]
+pub fn telemetry_stop(state: tauri::State<'_, Telemetry>) {
+    if let Some(stop) = state.0.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        stop.store(true, Ordering::Relaxed);
+    }
+}
+
+#[tauri::command]
+pub fn telemetry_running(state: tauri::State<'_, Telemetry>) -> bool {
+    state.0.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+}
+
+/// Recorded sessions on disk, newest first.
+#[tauri::command]
+pub fn telemetry_sessions() -> Vec<session::Session> {
+    session::list()
+}
+
+/// Reveal the sessions folder — the free-tier "share it yourself" escape hatch
+/// until uploads exist.
+#[tauri::command]
+pub fn open_sessions_dir(app: tauri::AppHandle) -> Result<(), CmdError> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = session::dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| CmdError::new("io", e.to_string()))?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| CmdError::new("io", e.to_string()))
+}
+
+/// Open the dash as its own always-on-top window (the fourth-monitor screen).
+/// Reuses the window if it already exists.
+#[tauri::command]
+pub fn open_dash(app: tauri::AppHandle) -> Result<(), CmdError> {
+    if let Some(window) = app.get_webview_window("dash") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    // Hash route, not a second HTML entry: `main.tsx` renders the dash for
+    // `#dash` and the tray app for everything else, so vite keeps one bundle.
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "dash",
+        tauri::WebviewUrl::App("index.html#dash".into()),
+    )
+    .title("ParcFerme Dash")
+    .inner_size(1000.0, 620.0)
+    .min_inner_size(720.0, 460.0)
+    .always_on_top(true)
+    .build()
+    .map_err(|e| CmdError::new("internal", e.to_string()))?;
+    Ok(())
+}
+
+/// Share a recorded session on parcferme.cc (SERVER_CONTRACT §10).
+///
+/// Slow by nature — it scans the whole recording, gzips it, and PUTs every
+/// compressed byte — so it runs on a worker thread like every other network
+/// command. `file` is a bare name from `telemetry_sessions`; `pf_core` refuses
+/// anything else.
+#[tauri::command]
+pub async fn share_session(
+    file: String,
+    private: Option<bool>,
+) -> Result<pf_core::api::UploadResult, CmdError> {
+    blocking(move || Ok(session::share(&file, private.unwrap_or(false))?)).await
 }

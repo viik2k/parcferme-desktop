@@ -75,7 +75,7 @@ impl Default for Config {
 ///
 /// Corner-indexed arrays are **FL, FR, RL, RR** throughout, per the header's
 /// own comment on `mWheel[4]`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct Frame {
     /// Monotonic, gapless: consumers use it to detect drops on the wire.
     pub seq: u64,
@@ -139,6 +139,13 @@ pub struct Frame {
     /// 1-based within the car's own class.
     pub place_in_class: Option<u32>,
     pub car_class: String,
+    /// The car as the game names it (`m_vehicle_name`), e.g. "Ferrari 499P".
+    /// Empty out of session. Not a folder id — nothing on a live session maps
+    /// to one — so a consumer sharing it sends this string as-is (§10).
+    pub car_name: String,
+    /// The track as the game names it (`ScoringInfoV01::m_track_name`), e.g.
+    /// "Le Mans 24h". Empty out of session, and display-ish like `car_name`.
+    pub track_name: String,
     /// Seconds to the car ahead **on track**.
     pub gap_ahead_s: Option<f64>,
     /// Seconds to the car behind on track.
@@ -269,6 +276,16 @@ impl Lmu {
     /// The next frame, giving up after `timeout`.
     pub fn next_frame_timeout(&self, timeout: Duration) -> Option<Frame> {
         self.frames.recv_timeout(timeout).ok()
+    }
+
+    /// False once the game has exited and the loops have stopped.
+    ///
+    /// A consumer polling with [`Lmu::next_frame_timeout`] cannot tell a quiet
+    /// session (menus, paused) from a dead one — both are `None` — but a dead
+    /// source returns `None` *immediately*, so a loop that doesn't check this
+    /// spins. Check it on every empty poll.
+    pub fn is_running(&self) -> bool {
+        !self.shutdown.load(Ordering::Relaxed)
     }
 
     pub fn stats(&self) -> Stats {
@@ -420,6 +437,11 @@ fn spawn_shm(
                     log::debug!("lmu frame dropped: consumer is behind");
                 }
             }
+            // The game exiting ends this loop, and this is the only thread that
+            // can see that. Raise the flag so the REST thread stops polling a
+            // localhost server that is gone, and so consumers can tell a dead
+            // source from a quiet one.
+            shutdown.store(true, Ordering::Relaxed);
         })
         .expect("spawn lmu-shm")
 }
@@ -542,6 +564,13 @@ pub fn build_frame(
     let car_class = player
         .map(|p| shm::c_str(&p.m_vehicle_class))
         .unwrap_or_default();
+    // What the session *is*, as opposed to what it's doing: the only place a
+    // recording learns its car and track, since neither channel publishes an
+    // id and `RestSnapshot::session_name` is the session type ("PRACTICE1").
+    let car_name = player
+        .map(|p| shm::c_str(&p.m_vehicle_name))
+        .unwrap_or_default();
+    let track_name = shm::c_str(&snap.scoring.m_track_name);
     let place = player.map(|p| p.m_place).unwrap_or(0);
     let place_in_class = player.map(|me| {
         let mine = me.m_vehicle_class;
@@ -584,6 +613,8 @@ pub fn build_frame(
         place,
         place_in_class,
         car_class,
+        car_name,
+        track_name,
         // On-track gaps, published per frame by LMU itself.
         gap_ahead_s: gap(telem.m_time_gap_car_ahead),
         gap_behind_s: gap(telem.m_time_gap_car_behind),

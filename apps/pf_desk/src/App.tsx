@@ -8,6 +8,7 @@ import { DownloadPanel } from "./components/DownloadPanel";
 import { OrganicLoader } from "./components/OrganicLoader";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SetupsPanel } from "./components/SetupsPanel";
+import { TelemetryPanel } from "./components/TelemetryPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { UploadPanel } from "./components/UploadPanel";
 import { authStatus, type DeviceUser } from "./lib/auth";
@@ -170,6 +171,7 @@ function App() {
               }}
             />
             <SetupsPanel />
+            <TelemetryPanel />
             <DownloadPanel onOpenSettings={() => setView("settings")} />
             <UploadPanel />
           </div>

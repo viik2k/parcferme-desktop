@@ -226,6 +226,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .manage(commands::Telemetry::default())
         .setup(|app| {
             setup_tray(app)?;
             setup_deep_links(app);
@@ -264,6 +265,13 @@ pub fn run() {
             commands::identify_setup,
             commands::setup_options,
             commands::upload_setup,
+            commands::telemetry_start,
+            commands::telemetry_stop,
+            commands::telemetry_running,
+            commands::telemetry_sessions,
+            commands::open_sessions_dir,
+            commands::open_dash,
+            commands::share_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the ParcFerme tray app")
