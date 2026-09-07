@@ -1,0 +1,46 @@
+{
+ "ambientTemp": 13.0,
+ "averagePathWetness": 0.0,
+ "currentEventTime": 597.8000000000001,
+ "darkCloud": 0.0,
+ "endEventTime": 1800.0,
+ "gameMode": "UNKNOWN",
+ "gamePhase": 5,
+ "inRealtime": false,
+ "lapDistance": 6981.6005859375,
+ "maxPathWetness": 0.0,
+ "maxPlayers": 0,
+ "maxTime": 900.0,
+ "maximumLaps": 4294967295,
+ "minPathWetness": 0.0,
+ "numRedLights": 5,
+ "numberOfPlayers": 0,
+ "numberOfVehicles": 24,
+ "passwordProtected": false,
+ "playerFileName": "Settings",
+ "playerName": "Finn Henderson-Idagi",
+ "raceCompletion": {
+  "timeCompletion": 0.6588888764381409
+ },
+ "raining": 0.0,
+ "sectorFlag": [
+  "UNKNOWN",
+  "UNKNOWN",
+  "UNKNOWN"
+ ],
+ "serverName": "-none-",
+ "serverPort": 0,
+ "session": "QUALIFY1",
+ "startEventTime": 5.0,
+ "startLightFrame": 0,
+ "timeRemainingInGamePhase": 308.15997314453125,
+ "trackName": "Circuit de Spa-Francorchamps",
+ "trackTemp": 18.969189232950043,
+ "windSpeed": {
+  "velocity": 0.0,
+  "x": 0.0,
+  "y": 0.0,
+  "z": 0.0
+ },
+ "yellowFlagState": "NONE"
+}

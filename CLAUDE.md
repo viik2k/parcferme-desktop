@@ -19,6 +19,10 @@ pnpm fmt:rust                             # cargo fmt --all
 pnpm test:rust                            # cargo test --workspace
 cargo test -p pf_core <test_name>        # run a single test in pf_core
 
+# LMU live source (needs the game running with Settings > Gameplay > Enable Plugins)
+cargo run -p pf_core --bin lmu -- --probe  # one merged frame as JSON, then exit
+cargo run -p pf_core --bin lmu -- --hz 20  # stream frames; stats to stderr every 10s
+
 # Icons
 pnpm icon apps/pf_desk/src-tauri/app-icon.png
 ```
@@ -41,6 +45,11 @@ crates/pf_core/src/
 ├── deeplink.rs   # parse parcferme:// URL schemes
 ├── settings.rs   # persisted settings: per-sim folder overrides + conflict policy
 ├── sim.rs        # supported sims: folder roots + per-sim layout (`Sim::layout` — iRacing `<car>`, ACC `<car>\<track>`, LMU `<track>`)
+├── lmu.rs        # Le Mans Ultimate live source: merges shared memory + REST into one Frame stream
+├── lmu/
+│   ├── shm.rs    # LMU_Data shared memory: win32 FFI, the game's lock, the packed struct transcript
+│   ├── rest.rs   # localhost:6397 slow loop (pit menu, weather, wear) at 1 Hz
+│   └── types.rs  # serde types for the REST bodies, derived from real captures
 └── error.rs      # Error enum (+ kind() for the UI hint map) + Result<T> alias
 
 apps/pf_desk/src-tauri/src/

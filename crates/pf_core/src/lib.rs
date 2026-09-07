@@ -12,6 +12,7 @@ pub mod car_match;
 pub mod deeplink;
 pub mod download;
 mod error;
+pub mod lmu;
 pub mod options;
 pub mod paths;
 pub mod settings;
