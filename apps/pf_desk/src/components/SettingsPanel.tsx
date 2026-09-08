@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { signOut } from "../lib/auth";
 import { detectSims, type SimFolder } from "../lib/download";
 import { toCmdError } from "../lib/errors";
 import {
@@ -9,19 +10,68 @@ import {
   openLogsDir,
   saveSettings,
   setAutostart,
-  type ConflictPolicy,
   type Settings,
 } from "../lib/settings";
 
+/** Section heading — the only chrome a section gets now that the cards are gone. */
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted/70">
+      {children}
+    </p>
+  );
+}
+
+/** A labelled switch row: the shape every toggle in here shares. */
+function Toggle({
+  title,
+  detail,
+  checked,
+  disabled,
+  onChange,
+}: {
+  title: string;
+  detail: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-3 py-1.5 text-xs">
+      <span className="text-foreground">
+        {title}
+        <span className="mt-0.5 block text-[10px] text-muted">{detail}</span>
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={onChange}
+        className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
+      />
+    </label>
+  );
+}
+
 /**
- * M4 Settings: per-sim folder overrides (native folder picker), the
- * conflict/overwrite policy, launch-at-startup, and the support log folder.
- * Every change saves immediately — there is no Save button to forget.
+ * Settings: sim folders, the conflict policy, the sync engine, startup, and
+ * the account. Every change saves immediately — there is no Save button to
+ * forget. Sections are divided by hairlines rather than cards, so the whole
+ * panel fits the companion window without scrolling much.
  */
-export function SettingsPanel({ onBack }: { onBack: () => void }) {
+export function SettingsPanel({
+  linked,
+  onBack,
+  onSignedOut,
+}: {
+  linked: boolean;
+  onBack: () => void;
+  onSignedOut: () => void;
+}) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [sims, setSims] = useState<SimFolder[] | null>(null);
   const [autostart, setAutostartState] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -77,11 +127,6 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
     await persist({ ...settings, simFolders });
   }
 
-  async function setPolicy(conflictPolicy: ConflictPolicy) {
-    if (!settings) return;
-    await persist({ ...settings, conflictPolicy });
-  }
-
   async function toggleAutostart() {
     if (autostart === null) return;
     const next = !autostart;
@@ -94,172 +139,166 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
     }
   }
 
+  async function handleSignOut() {
+    setBusy(true);
+    try {
+      await signOut();
+      onSignedOut();
+    } catch (e) {
+      setError(toCmdError(e).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <div className="rounded-2xl bg-card p-6 ring-1 ring-border">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">Settings</h2>
+    <div className="divide-y divide-border">
+      <div className="flex items-center justify-between pb-2">
+        <h2 className="text-xs font-semibold">Settings</h2>
         <button
           onClick={onBack}
-          className="rounded-md px-2 py-1 text-xs text-muted ring-1 ring-border transition hover:text-foreground"
+          className="text-xs text-muted transition hover:text-foreground"
         >
-          ← Back
+          Done
         </button>
       </div>
 
       {/* Per-sim setups folders */}
-      <div className="mt-5 space-y-2">
-        <p className="text-xs font-medium text-muted">Setup folders</p>
+      <div className="py-3">
+        <Label>Setup folders</Label>
         {sims === null ? (
           <p className="text-xs text-muted">
-            <span className="pf-dance mr-1.5" aria-hidden="true" />Detecting…
+            <span className="pf-dance mr-1.5" aria-hidden="true" />
+            Detecting…
           </p>
         ) : (
-          sims.map((s) => (
-            <div
-              key={s.id}
-              className="rounded-lg bg-background/50 px-3 py-2 text-xs ring-1 ring-border"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-medium text-foreground">{s.name}</span>
-                <span
-                  className={s.found ? "text-success" : "text-destructive/80"}
-                  title={
-                    s.found
-                      ? "Folder found — downloads will land here"
-                      : "Folder not found on this PC — pick it below"
-                  }
-                >
-                  {s.found ? "Found ✓" : "Not found"}
-                </span>
-              </div>
-              {s.dir && (
-                <p className="mt-0.5 break-all font-mono text-muted">{s.dir}</p>
-              )}
-              <div className="mt-2 flex items-center gap-2">
-                <button
-                  onClick={() => void browse(s)}
-                  className="rounded-md px-2 py-1 text-xs text-muted ring-1 ring-border transition hover:text-foreground"
-                >
-                  Browse…
-                </button>
-                {s.overridden && (
-                  <button
-                    onClick={() => void resetOverride(s.id)}
-                    className="rounded-md px-2 py-1 text-xs text-muted ring-1 ring-border transition hover:text-foreground"
-                    title="Forget the override and auto-detect again"
+          <ul className="divide-y divide-border/60">
+            {sims.map((s) => (
+              <li key={s.id} className="py-1.5 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-foreground">{s.name}</span>
+                  {s.overridden && (
+                    <span className="text-[10px] text-primary">override</span>
+                  )}
+                  <span
+                    className={`ml-auto text-[10px] ${
+                      s.found ? "text-success" : "text-destructive/80"
+                    }`}
+                    title={
+                      s.found
+                        ? "Folder found — downloads land here"
+                        : "Folder not found on this PC — pick it below"
+                    }
                   >
-                    Use detected
-                  </button>
-                )}
-                {s.overridden && (
-                  <span className="ml-auto rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary ring-1 ring-primary/30">
-                    override
+                    {s.found ? "Found ✓" : "Not found"}
                   </span>
+                  <button
+                    onClick={() => void browse(s)}
+                    className="text-[10px] text-muted underline-offset-2 transition hover:text-foreground hover:underline"
+                  >
+                    Browse…
+                  </button>
+                  {s.overridden && (
+                    <button
+                      onClick={() => void resetOverride(s.id)}
+                      title="Forget the override and auto-detect again"
+                      className="text-[10px] text-muted underline-offset-2 transition hover:text-foreground hover:underline"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+                {s.dir && (
+                  <p className="truncate font-mono text-[10px] text-muted/80" title={s.dir}>
+                    {s.dir}
+                  </p>
                 )}
-              </div>
-            </div>
-          ))
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 
       {/* Conflict policy */}
-      <div className="mt-5 space-y-2">
-        <p className="text-xs font-medium text-muted">
-          If a setup file already exists
-        </p>
-        {(
-          [
-            {
-              value: "keep_both" as const,
-              label: "Keep both",
-              detail: "Saves the new one as “name (2)” — never touches your file.",
-            },
-            {
-              value: "overwrite" as const,
-              label: "Overwrite",
-              detail: "Replaces the existing file with the downloaded one.",
-            },
-          ]
-        ).map((opt) => {
-          const selected = settings?.conflictPolicy === opt.value;
-          return (
+      <div className="py-3">
+        <Label>If a setup file already exists</Label>
+        <div className="flex gap-1 rounded-md bg-card p-0.5 ring-1 ring-border">
+          {(
+            [
+              { value: "keep_both" as const, label: "Keep both" },
+              { value: "overwrite" as const, label: "Overwrite" },
+            ]
+          ).map((opt) => (
             <button
               key={opt.value}
-              onClick={() => void setPolicy(opt.value)}
+              onClick={() =>
+                settings && void persist({ ...settings, conflictPolicy: opt.value })
+              }
               disabled={!settings}
-              className={`w-full rounded-lg px-3 py-2 text-left text-xs ring-1 transition ${
-                selected
-                  ? "bg-primary/10 ring-primary/40"
-                  : "bg-background/50 ring-border hover:ring-primary/30"
+              className={`flex-1 rounded px-2 py-1 text-[11px] font-medium transition ${
+                settings?.conflictPolicy === opt.value
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted hover:text-foreground"
               }`}
             >
-              <span
-                className={`font-medium ${selected ? "text-primary" : "text-foreground"}`}
-              >
-                {opt.label}
-                {selected ? " ✓" : ""}
-              </span>
-              <span className="mt-0.5 block text-muted">{opt.detail}</span>
+              {opt.label}
             </button>
-          );
-        })}
-        <p className="text-[10px] text-muted/80">
-          Re-downloading an identical file never creates a copy — equips are
-          safe to repeat.
+          ))}
+        </div>
+        <p className="mt-1 text-[10px] text-muted/80">
+          {settings?.conflictPolicy === "overwrite"
+            ? "Replaces the existing file with the downloaded one."
+            : "Saves the new one as “name (2)” — never touches your file."}
         </p>
       </div>
 
       {/* Startup */}
-      <div className="mt-5">
-        <p className="text-xs font-medium text-muted">Startup</p>
-        <label className="mt-2 flex cursor-pointer items-center justify-between rounded-lg bg-background/50 px-3 py-2 text-xs ring-1 ring-border">
-          <span className="text-foreground">
-            Launch at startup
-            <span className="block text-muted">
-              Starts quietly in the tray, ready for Equip clicks.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            checked={autostart ?? false}
-            disabled={autostart === null}
-            onChange={() => void toggleAutostart()}
-            className="h-4 w-4 accent-primary"
-          />
-        </label>
+      <div className="py-3">
+        <Label>Startup</Label>
+        <Toggle
+          title="Launch at startup"
+          detail="Starts quietly in the tray, ready for Equip clicks."
+          checked={autostart ?? false}
+          disabled={autostart === null}
+          onChange={() => void toggleAutostart()}
+        />
       </div>
 
-      {/* Support */}
-      <div className="mt-5">
-        <p className="text-xs font-medium text-muted">Support</p>
-        <button
-          onClick={() => void openLogsDir().catch(() => undefined)}
-          className="mt-2 w-full rounded-lg px-3 py-2 text-xs text-muted ring-1 ring-border transition hover:text-foreground"
-        >
-          Open logs folder
-        </button>
-        <p className="mt-1 text-[10px] text-muted/80">
-          Logs contain no tokens or personal data — safe to attach to a bug
-          report.
-        </p>
+      {/* Account + support */}
+      <div className="py-3">
+        <Label>Account</Label>
+        <div className="flex gap-2">
+          <button
+            onClick={() => void openLogsDir().catch(() => undefined)}
+            className="flex-1 rounded-md px-2 py-1.5 text-[11px] text-muted ring-1 ring-border transition hover:text-foreground"
+            title="Logs contain no tokens or personal data — safe to attach to a bug report"
+          >
+            Open logs
+          </button>
+          {linked && (
+            <button
+              onClick={() => void handleSignOut()}
+              disabled={busy}
+              className="flex-1 rounded-md px-2 py-1.5 text-[11px] text-muted ring-1 ring-border transition hover:text-destructive disabled:opacity-50"
+            >
+              Sign out
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Legal — the site's policy covers this app (its section on the
-          desktop application describes exactly what it reads and sends). */}
-      <div className="mt-5 flex items-center gap-3 text-[10px] text-muted/80">
+      {/* Legal — the site's policy covers this app (its section on the desktop
+          application describes exactly what it reads and sends). */}
+      <div className="flex items-center gap-3 pt-3 text-[10px] text-muted/70">
         <button
-          onClick={() =>
-            void openUrl("https://parcferme.cc/privacy").catch(() => undefined)
-          }
+          onClick={() => void openUrl("https://parcferme.cc/privacy").catch(() => undefined)}
           className="underline-offset-2 transition hover:text-foreground hover:underline"
         >
           Privacy Policy
         </button>
         <span aria-hidden="true">·</span>
         <button
-          onClick={() =>
-            void openUrl("https://parcferme.cc/tos").catch(() => undefined)
-          }
+          onClick={() => void openUrl("https://parcferme.cc/tos").catch(() => undefined)}
           className="underline-offset-2 transition hover:text-foreground hover:underline"
         >
           Terms of Service
@@ -267,7 +306,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
       </div>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive ring-1 ring-destructive/30">
+        <p className="mt-3 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive ring-1 ring-destructive/30">
           {error}
         </p>
       )}

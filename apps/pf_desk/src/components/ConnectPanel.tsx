@@ -96,11 +96,10 @@ export function ConnectPanel({
   }
 
   return (
-    <div className="rounded-2xl bg-card p-6 ring-1 ring-border">
-      <h2 className="text-base font-semibold">Connect your account</h2>
-      <p className="mt-1 text-sm text-muted">
-        Link this device to your Parc Fermé account to equip setups straight from
-        the website.
+    <div className="px-1 py-6 text-center">
+      <h2 className="text-sm font-semibold">Connect your account</h2>
+      <p className="mx-auto mt-1 max-w-[16rem] text-xs text-muted">
+        Link this device to equip setups straight from parcferme.cc.
       </p>
 
       {phase === "waiting" && flow ? (
@@ -114,7 +113,7 @@ export function ConnectPanel({
           </p>
           <button
             onClick={() => void openApproval(flow)}
-            className="mt-4 w-full rounded-lg bg-card px-4 py-2 text-sm font-medium text-foreground ring-1 ring-border transition hover:bg-border/40"
+            className="mt-4 w-full rounded-md bg-card px-3 py-2 text-xs font-medium text-foreground ring-1 ring-border transition hover:bg-border/40"
           >
             Reopen approval page
           </button>
@@ -127,7 +126,7 @@ export function ConnectPanel({
         <button
           onClick={() => void start()}
           disabled={phase === "starting"}
-          className="mt-5 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-5 w-full rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {phase === "starting" ? (
           <>
@@ -140,7 +139,7 @@ export function ConnectPanel({
       )}
 
       {phase === "error" && message && (
-        <p className="mt-4 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive ring-1 ring-destructive/30">
+        <p className="mt-4 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive ring-1 ring-destructive/30">
           {message}
         </p>
       )}

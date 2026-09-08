@@ -44,6 +44,7 @@ crates/pf_core/src/
 ├── upload.rs     # identify a local setup (sim/car/track off its path) + push to the site
 ├── deeplink.rs   # parse parcferme:// URL schemes
 ├── session.rs    # telemetry sessions: record to JSON-Lines, summarize, gzip + share (§10)
+├── sync.rs       # Sync Engine: daemon thread — record every LMU session, push it, delete it
 ├── settings.rs   # persisted settings: per-sim folder overrides + conflict policy
 ├── sim.rs        # supported sims: folder roots + per-sim layout (`Sim::layout` — iRacing `<car>`, ACC `<car>\<track>`, LMU `<track>`)
 ├── lmu.rs        # Le Mans Ultimate live source: merges shared memory + REST into one Frame stream
@@ -58,9 +59,9 @@ apps/pf_desk/src-tauri/src/
 └── commands.rs   # Tauri #[command] fns — bridges React IPC to pf_core; runs blocking work on spawn_blocking
 
 apps/pf_desk/src/
-├── main.tsx      # one bundle, two windows: `index.html#dash` renders Dash, else App
-├── App.tsx       # root component: auth state machine, home/settings views, equip banner
-├── components/   # ConnectPanel, Connected, DownloadPanel, SettingsPanel, Dash, TelemetryPanel
+├── main.tsx      # renders App
+├── App.tsx       # shell: status bar (sync badge), Setups/Install/Push/Sync tabs, settings, equip banner
+├── components/   # ConnectPanel, SetupsPanel, DownloadPanel, UploadPanel, SyncPanel, SettingsPanel, UpdateBanner
 └── lib/          # thin TS wrappers over Tauri invoke() (auth, download, settings, errors)
 ```
 

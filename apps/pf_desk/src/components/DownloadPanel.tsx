@@ -38,65 +38,63 @@ export function DownloadPanel({ onOpenSettings }: { onOpenSettings: () => void }
   const hint = error ? errorHint(error.kind) : null;
 
   return (
-    <div className="rounded-2xl bg-card p-6 ring-1 ring-border">
-      <h2 className="text-base font-semibold">Download a setup</h2>
-      <p className="mt-1 text-sm text-muted">
-        Paste a Parc Fermé setup link to install it straight into the right sim
-        folder.
+    <div>
+      <p className="text-[11px] text-muted">
+        Paste a setup link — it lands in the right sim folder.
       </p>
 
-      <input
+      <div className="mt-2 flex gap-2">
+        <input
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && canDownload) void handleDownload();
         }}
-        placeholder="https://parcferme.cc/setups/…"
-        className="mt-4 w-full rounded-lg bg-background px-3 py-2 text-sm text-foreground ring-1 ring-border focus:outline-none focus:ring-primary"
-      />
+          placeholder="https://parcferme.cc/setups/…"
+          className="min-w-0 flex-1 rounded-md bg-card px-2.5 py-1.5 text-xs text-foreground ring-1 ring-border focus:outline-none focus:ring-primary"
+        />
 
-      <button
-        onClick={() => void handleDownload()}
-        disabled={!canDownload}
-        className="mt-3 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {phase === "working" ? (
-          <>
-            <span className="pf-dance mr-1.5" aria-hidden="true" />Downloading…
-          </>
-        ) : (
-          "Download"
-        )}
-      </button>
+        <button
+          onClick={() => void handleDownload()}
+          disabled={!canDownload}
+          className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {phase === "working" ? (
+            <span className="pf-dance" aria-hidden="true" />
+          ) : (
+            "Install"
+          )}
+        </button>
+      </div>
 
       {phase === "done" && result && (
-        <div className="mt-4 rounded-lg bg-success/10 px-3 py-2 text-sm text-success ring-1 ring-success/30">
+        <div className="mt-3 rounded-md bg-success/10 px-2.5 py-1.5 text-xs text-success ring-1 ring-success/30">
           <p className="font-medium">
             {actionLabel(result.action)}
             {result.name ? ` — “${result.name}”` : ""} ✓
           </p>
-          <p className="mt-0.5 text-xs text-success/80">
+          <p className="mt-0.5 text-[10px] text-success/80">
             {result.sim}
             {result.car ? ` · ${result.car}` : ""}
             {result.track ? ` · ${result.track}` : ""}
           </p>
-          <p className="mt-0.5 break-all font-mono text-xs text-success/80">
+          <p className="mt-0.5 break-all font-mono text-[10px] text-success/80">
             {result.path}
           </p>
           {needsTrackNote(result) && (
-            <p className="mt-1 text-xs text-success/80">{trackNote(result)}</p>
+            <p className="mt-1 text-[10px] text-success/80">{trackNote(result)}</p>
           )}
         </div>
       )}
 
       {phase === "error" && error && (
-        <div className="mt-4 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive ring-1 ring-destructive/30">
+        <div className="mt-3 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive ring-1 ring-destructive/30">
           <p>{error.message}</p>
-          {hint && <p className="mt-1 text-xs text-destructive/80">{hint}</p>}
+          {hint && <p className="mt-1 text-[10px] text-destructive/80">{hint}</p>}
           {isSettingsFixable(error.kind) && (
             <button
               onClick={onOpenSettings}
-              className="mt-2 rounded-md px-2 py-1 text-xs font-medium text-destructive ring-1 ring-destructive/40 transition hover:bg-destructive/10"
+              className="mt-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-destructive ring-1 ring-destructive/40 transition hover:bg-destructive/10"
             >
               Open Settings
             </button>

@@ -226,10 +226,13 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .manage(commands::Telemetry::default())
         .setup(|app| {
             setup_tray(app)?;
             setup_deep_links(app);
+            // The sync engine: records LMU sessions and pushes them, when the
+            // user has turned it on in Settings. Its own thread, no shutdown —
+            // recordings are flushed per frame, so process exit is safe.
+            pf_core::sync::spawn();
             // The window is created hidden (tauri.conf.json); autostart launches
             // stay in the tray, everything else (user launch, deep-link cold
             // start) shows it.
@@ -265,13 +268,8 @@ pub fn run() {
             commands::identify_setup,
             commands::setup_options,
             commands::upload_setup,
-            commands::telemetry_start,
-            commands::telemetry_stop,
-            commands::telemetry_running,
-            commands::telemetry_sessions,
+            commands::sync_status,
             commands::open_sessions_dir,
-            commands::open_dash,
-            commands::share_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the ParcFerme tray app")

@@ -55,69 +55,67 @@ export function SetupsPanel() {
   }
 
   return (
-    <div className="rounded-2xl bg-card p-6 ring-1 ring-border">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold">Your setups</h2>
-        <button
-          onClick={() => void load()}
-          className="text-xs text-muted transition hover:text-foreground"
-        >
-          Refresh
-        </button>
-      </div>
-
-      <div className="mt-3 flex gap-1 rounded-lg bg-background p-1 ring-1 ring-border">
+    <div>
+      <div className="flex items-center gap-3">
         {SCOPES.map((s) => (
           <button
             key={s.id}
             onClick={() => setScope(s.id)}
-            className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+            className={`text-xs transition ${
               scope === s.id
-                ? "bg-primary text-primary-foreground"
+                ? "font-medium text-primary"
                 : "text-muted hover:text-foreground"
             }`}
           >
             {s.label}
           </button>
         ))}
+        <button
+          onClick={() => void load()}
+          className="ml-auto text-xs text-muted transition hover:text-foreground"
+        >
+          Refresh
+        </button>
       </div>
 
       {error ? (
-        <div className="mt-4 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive ring-1 ring-destructive/30">
+        <div className="mt-3 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive ring-1 ring-destructive/30">
           <p>{error.message}</p>
           {errorHint(error.kind) && (
-            <p className="mt-1 text-xs text-destructive/80">{errorHint(error.kind)}</p>
+            <p className="mt-1 text-[10px] text-destructive/80">
+              {errorHint(error.kind)}
+            </p>
           )}
         </div>
       ) : items === null ? (
-        <div className="mt-4 flex justify-center py-6 text-muted">
+        <div className="mt-3 flex justify-center py-6 text-muted">
           <OrganicLoader size={56} label="Loading setups" />
         </div>
       ) : items.length === 0 ? (
-        <p className="mt-4 text-sm text-muted">
+        <p className="mt-4 text-xs text-muted">
           {scope === "team"
             ? "Nothing in your team vault yet."
             : "You haven’t published any setups yet."}
         </p>
       ) : (
-        <ul className="mt-4 flex max-h-80 flex-col gap-2 overflow-y-auto">
+        <ul className="mt-1 divide-y divide-border">
           {items.map((s) => {
             const state = status[s.id];
             return (
               <li
                 key={s.id}
-                className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2 ring-1 ring-border"
+                className="flex items-center justify-between gap-3 py-2"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-sm">{s.name}</p>
-                  <p className="truncate text-xs text-muted">
+                  <p className="truncate text-xs">{s.name}</p>
+                  <p className="truncate text-[10px] text-muted">
                     {simLabel(s.sim)}
                     {s.car ? ` · ${s.car}` : ""}
                     {s.track ? ` · ${s.track}` : ""}
                   </p>
                   {state && state !== "installing" && (
                     <p
-                      className={`mt-0.5 text-xs ${
+                      className={`mt-0.5 text-[10px] ${
                         state.endsWith("✓") ? "text-success" : "text-destructive"
                       }`}
                     >
@@ -128,7 +126,7 @@ export function SetupsPanel() {
                 <button
                   onClick={() => void install(s)}
                   disabled={state === "installing"}
-                  className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-[11px] font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {state === "installing" ? (
                     <>
