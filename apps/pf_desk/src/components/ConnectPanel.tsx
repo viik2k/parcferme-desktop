@@ -113,7 +113,7 @@ export function ConnectPanel({
           </p>
           <button
             onClick={() => void openApproval(flow)}
-            className="mt-4 w-full rounded-md bg-card px-3 py-2 text-xs font-medium text-foreground ring-1 ring-border transition hover:bg-border/40"
+            className="glass mt-4 w-full rounded-full px-3 py-2 text-xs font-medium text-foreground hover:bg-white/12"
           >
             Reopen approval page
           </button>
@@ -126,7 +126,7 @@ export function ConnectPanel({
         <button
           onClick={() => void start()}
           disabled={phase === "starting"}
-          className="mt-5 w-full rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-5 w-full rounded-full bg-primary glow px-3 py-2 text-xs font-semibold text-primary-foreground hover:brightness-110 disabled:opacity-50"
         >
           {phase === "starting" ? (
           <>
@@ -139,7 +139,7 @@ export function ConnectPanel({
       )}
 
       {phase === "error" && message && (
-        <p className="mt-4 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive ring-1 ring-destructive/30">
+        <p className="mt-4 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive ring-1 ring-destructive/30">
           {message}
         </p>
       )}

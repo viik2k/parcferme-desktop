@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   actionLabel,
   downloadSetup,
@@ -7,6 +7,9 @@ import {
   type InstalledSetup,
 } from "../lib/download";
 import { errorHint, isSettingsFixable, toCmdError, type CmdError } from "../lib/errors";
+import { listSetups, type SetupSummary } from "../lib/setups";
+import { OrganicLoader } from "./OrganicLoader";
+import { SetupList } from "./SetupList";
 
 type Phase = "idle" | "working" | "done" | "error";
 
@@ -20,6 +23,14 @@ export function DownloadPanel({ onOpenSettings }: { onOpenSettings: () => void }
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<InstalledSetup | null>(null);
   const [error, setError] = useState<CmdError | null>(null);
+  // The public shelf under the bar: setup of the week, then newest first.
+  // null = loading, [] = nothing to show (including a server without §9 browse,
+  // which must not break the paste bar above it).
+  const [browse, setBrowse] = useState<SetupSummary[] | null>(null);
+
+  useEffect(() => {
+    listSetups("browse").then(setBrowse, () => setBrowse([]));
+  }, []);
 
   async function handleDownload() {
     setPhase("working");
@@ -35,6 +46,8 @@ export function DownloadPanel({ onOpenSettings }: { onOpenSettings: () => void }
   }
 
   const canDownload = url.trim().length > 0 && phase !== "working";
+  const featured = browse?.find((s) => s.featured) ?? null;
+  const rest = browse?.filter((s) => s !== featured) ?? [];
   const hint = error ? errorHint(error.kind) : null;
 
   return (
@@ -51,13 +64,13 @@ export function DownloadPanel({ onOpenSettings }: { onOpenSettings: () => void }
           if (e.key === "Enter" && canDownload) void handleDownload();
         }}
           placeholder="https://parcferme.cc/setups/…"
-          className="min-w-0 flex-1 rounded-md bg-card px-2.5 py-1.5 text-xs text-foreground ring-1 ring-border focus:outline-none focus:ring-primary"
+          className="min-w-0 flex-1 rounded-full bg-black/30 px-3 py-1.5 text-xs text-foreground ring-1 ring-border focus:outline-none focus:ring-primary/60"
         />
 
         <button
           onClick={() => void handleDownload()}
           disabled={!canDownload}
-          className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          className="shrink-0 rounded-full bg-primary glow px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:brightness-110 disabled:opacity-50"
         >
           {phase === "working" ? (
             <span className="pf-dance" aria-hidden="true" />
@@ -68,7 +81,7 @@ export function DownloadPanel({ onOpenSettings }: { onOpenSettings: () => void }
       </div>
 
       {phase === "done" && result && (
-        <div className="mt-3 rounded-md bg-success/10 px-2.5 py-1.5 text-xs text-success ring-1 ring-success/30">
+        <div className="mt-3 rounded-xl bg-success/10 px-3 py-2 text-xs text-success ring-1 ring-success/30">
           <p className="font-medium">
             {actionLabel(result.action)}
             {result.name ? ` — “${result.name}”` : ""} ✓
@@ -88,19 +101,42 @@ export function DownloadPanel({ onOpenSettings }: { onOpenSettings: () => void }
       )}
 
       {phase === "error" && error && (
-        <div className="mt-3 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive ring-1 ring-destructive/30">
+        <div className="mt-3 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive ring-1 ring-destructive/30">
           <p>{error.message}</p>
           {hint && <p className="mt-1 text-[10px] text-destructive/80">{hint}</p>}
           {isSettingsFixable(error.kind) && (
             <button
               onClick={onOpenSettings}
-              className="mt-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-destructive ring-1 ring-destructive/40 transition hover:bg-destructive/10"
+              className="mt-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium text-destructive ring-1 ring-destructive/40 hover:bg-destructive/10"
             >
               Open Settings
             </button>
           )}
         </div>
       )}
+
+      <div className="mt-5">
+        {browse === null ? (
+          <div className="flex justify-center py-6 text-muted">
+            <OrganicLoader size={56} label="Loading setups" />
+          </div>
+        ) : browse.length === 0 ? null : (
+          <>
+            {featured && (
+              <>
+                <h2 className="text-[10px] font-semibold uppercase tracking-wide text-primary">
+                  Setup of the week
+                </h2>
+                <SetupList items={[featured]} />
+              </>
+            )}
+            <h2 className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-muted">
+              Newest
+            </h2>
+            <SetupList items={rest} />
+          </>
+        )}
+      </div>
     </div>
   );
 }

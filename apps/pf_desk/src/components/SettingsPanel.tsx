@@ -154,13 +154,13 @@ export function SettingsPanel({
   return (
     <div className="divide-y divide-border">
       <div className="flex items-center justify-between pb-2">
-        <h2 className="text-xs font-semibold">Settings</h2>
         <button
           onClick={onBack}
-          className="text-xs text-muted transition hover:text-foreground"
+          className="rounded-full px-3 py-1 text-[11px] font-medium text-foreground ring-1 ring-border hover:bg-white/10"
         >
-          Done
+          ‹ Back
         </button>
+        <h2 className="text-xs font-semibold">Settings</h2>
       </div>
 
       {/* Per-sim setups folders */}
@@ -194,7 +194,7 @@ export function SettingsPanel({
                   </span>
                   <button
                     onClick={() => void browse(s)}
-                    className="text-[10px] text-muted underline-offset-2 transition hover:text-foreground hover:underline"
+                    className="rounded-full px-2.5 py-1 text-[11px] text-muted ring-1 ring-border hover:bg-white/8 hover:text-foreground"
                   >
                     Browse…
                   </button>
@@ -202,7 +202,7 @@ export function SettingsPanel({
                     <button
                       onClick={() => void resetOverride(s.id)}
                       title="Forget the override and auto-detect again"
-                      className="text-[10px] text-muted underline-offset-2 transition hover:text-foreground hover:underline"
+                      className="rounded-full px-2.5 py-1 text-[11px] text-muted ring-1 ring-border hover:bg-white/8 hover:text-foreground"
                     >
                       Reset
                     </button>
@@ -222,7 +222,7 @@ export function SettingsPanel({
       {/* Conflict policy */}
       <div className="py-3">
         <Label>If a setup file already exists</Label>
-        <div className="flex gap-1 rounded-md bg-card p-0.5 ring-1 ring-border">
+        <div className="glass flex gap-1 rounded-full p-1">
           {(
             [
               { value: "keep_both" as const, label: "Keep both" },
@@ -235,9 +235,9 @@ export function SettingsPanel({
                 settings && void persist({ ...settings, conflictPolicy: opt.value })
               }
               disabled={!settings}
-              className={`flex-1 rounded px-2 py-1 text-[11px] font-medium transition ${
+              className={`flex-1 rounded-full px-2 py-1 text-[11px] font-medium ${
                 settings?.conflictPolicy === opt.value
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-primary text-primary-foreground glow"
                   : "text-muted hover:text-foreground"
               }`}
             >
@@ -270,7 +270,7 @@ export function SettingsPanel({
         <div className="flex gap-2">
           <button
             onClick={() => void openLogsDir().catch(() => undefined)}
-            className="flex-1 rounded-md px-2 py-1.5 text-[11px] text-muted ring-1 ring-border transition hover:text-foreground"
+            className="flex-1 rounded-full px-2 py-1.5 text-[11px] text-muted ring-1 ring-border hover:bg-white/8 hover:text-foreground"
             title="Logs contain no tokens or personal data — safe to attach to a bug report"
           >
             Open logs
@@ -279,7 +279,7 @@ export function SettingsPanel({
             <button
               onClick={() => void handleSignOut()}
               disabled={busy}
-              className="flex-1 rounded-md px-2 py-1.5 text-[11px] text-muted ring-1 ring-border transition hover:text-destructive disabled:opacity-50"
+              className="flex-1 rounded-full px-2 py-1.5 text-[11px] text-muted ring-1 ring-border hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
             >
               Sign out
             </button>
@@ -292,21 +292,21 @@ export function SettingsPanel({
       <div className="flex items-center gap-3 pt-3 text-[10px] text-muted/70">
         <button
           onClick={() => void openUrl("https://parcferme.cc/privacy").catch(() => undefined)}
-          className="underline-offset-2 transition hover:text-foreground hover:underline"
+          className="underline underline-offset-2 hover:text-foreground"
         >
           Privacy Policy
         </button>
         <span aria-hidden="true">·</span>
         <button
           onClick={() => void openUrl("https://parcferme.cc/tos").catch(() => undefined)}
-          className="underline-offset-2 transition hover:text-foreground hover:underline"
+          className="underline underline-offset-2 hover:text-foreground"
         >
           Terms of Service
         </button>
       </div>
 
       {error && (
-        <p className="mt-3 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive ring-1 ring-destructive/30">
+        <p className="mt-3 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive ring-1 ring-destructive/30">
           {error}
         </p>
       )}

@@ -181,6 +181,10 @@ pub struct SetupSummary {
     pub track: Option<String>,
     #[serde(default, rename = "updatedAt")]
     pub updated_at: Option<String>,
+    /// Setup of the week. Only the `browse` scope ever sets it; defaults false
+    /// so a server that predates the flag just yields an unfeatured list.
+    #[serde(default)]
+    pub featured: bool,
 }
 
 /// Wire envelope of the browse list; `items` defaults so an empty body reads

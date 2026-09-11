@@ -49,7 +49,7 @@ export function UpdateBanner() {
 
   return (
     <div className="mb-3">
-      <div className="flex items-center justify-between gap-3 rounded-md bg-primary/10 px-2.5 py-1.5 text-xs text-primary ring-1 ring-primary/30">
+      <div className="flex items-center justify-between gap-3 rounded-xl bg-primary/10 px-3 py-2 text-xs text-primary ring-1 ring-primary/30">
         {state.kind === "available" && (
           <>
             <span>
@@ -57,7 +57,7 @@ export function UpdateBanner() {
             </span>
             <button
               onClick={() => install(state.update)}
-              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-primary/40 transition hover:bg-primary/10"
+              className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-primary/40 hover:bg-primary/10"
             >
               Update
             </button>
@@ -77,7 +77,7 @@ export function UpdateBanner() {
             </span>
             <button
               onClick={() => void relaunch()}
-              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-primary/40 transition hover:bg-primary/10"
+              className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-primary/40 hover:bg-primary/10"
             >
               Restart
             </button>

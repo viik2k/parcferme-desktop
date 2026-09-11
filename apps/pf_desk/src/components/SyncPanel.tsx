@@ -131,13 +131,13 @@ export function SyncPanel() {
 
       {/* The queue: finished recordings that haven't gone up yet. */}
       <div className="py-3">
-        <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <div className="mb-1.5 flex items-center justify-between gap-2">
           <p className="text-[10px] font-medium uppercase tracking-wide text-muted/70">
             Queue{queue.length > 0 ? ` (${queue.length})` : ""}
           </p>
           <button
             onClick={() => void openSessionsDir().catch(() => undefined)}
-            className="text-[10px] text-muted underline-offset-2 transition hover:text-foreground hover:underline"
+            className="rounded-full px-2.5 py-1 text-[11px] text-muted ring-1 ring-border hover:bg-white/8 hover:text-foreground"
           >
             Open folder
           </button>
@@ -174,7 +174,7 @@ export function SyncPanel() {
           {last.url ? (
             <button
               onClick={() => void openUrl(last.url as string).catch(() => undefined)}
-              className="text-left text-[10px] text-success underline-offset-2 hover:underline"
+              className="text-left text-[10px] text-success underline underline-offset-2 hover:brightness-125"
             >
               Uploaded {when(last.atUnix)} ✓ — view on parcferme.cc
             </button>
@@ -190,7 +190,7 @@ export function SyncPanel() {
       )}
 
       {error && (
-        <p className="mt-3 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive ring-1 ring-destructive/30">
+        <p className="mt-3 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive ring-1 ring-destructive/30">
           {error}
         </p>
       )}

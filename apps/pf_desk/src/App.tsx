@@ -89,7 +89,7 @@ function App() {
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
+      <header className="glass-bar flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
         <img
           src={logo}
           alt="Parc Fermé"
@@ -101,7 +101,7 @@ function App() {
           onClick={() => setSettingsOpen((open) => !open)}
           aria-label="Settings"
           title="Settings"
-          className={`ml-auto rounded-md px-1.5 py-1 text-sm transition hover:text-foreground ${
+          className={`ml-auto flex size-6 items-center justify-center rounded-full text-xs ring-1 ring-border hover:bg-white/10 hover:text-foreground ${
             settingsOpen ? "text-primary" : "text-muted"
           }`}
         >
@@ -131,7 +131,7 @@ function App() {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`-mb-px border-b py-2 text-xs font-medium transition ${
+              className={`-mb-px border-b py-2 text-xs font-medium ${
                 tab === t.id
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted hover:text-foreground"
@@ -190,7 +190,7 @@ function App() {
         )}
       </main>
 
-      <footer className="flex h-7 shrink-0 items-center justify-between border-t border-border px-3 text-[10px] text-muted/70">
+      <footer className="glass-bar flex h-7 shrink-0 items-center justify-between border-t border-border px-3 text-[10px] text-muted/70">
         <span>{version ? `v${version}` : ""}</span>
         <span>closes to the tray</span>
       </footer>
@@ -255,7 +255,7 @@ function EquipBanner({
 
   return (
     <div
-      className={`mb-3 flex items-start justify-between gap-2 rounded-md px-2.5 py-1.5 text-xs ring-1 ${tone}`}
+      className={`mb-3 flex items-start justify-between gap-2 rounded-xl px-3 py-2 text-xs ring-1 ${tone}`}
     >
       <span className="min-w-0">
         {ok ? (
@@ -284,7 +284,7 @@ function EquipBanner({
             {isSettingsFixable(equip.kind) && (
               <button
                 onClick={onOpenSettings}
-                className="mt-1 rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-destructive/40 transition hover:bg-destructive/10"
+                className="mt-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-destructive/40 hover:bg-destructive/10"
               >
                 Open Settings
               </button>
@@ -295,7 +295,7 @@ function EquipBanner({
       <button
         onClick={onDismiss}
         aria-label="Dismiss"
-        className="shrink-0 opacity-70 hover:opacity-100"
+        className="flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] opacity-70 hover:bg-white/10 hover:opacity-100"
       >
         ✕
       </button>

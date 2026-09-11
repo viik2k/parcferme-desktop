@@ -438,15 +438,18 @@ publishing the draft release is the whole "ship" step.
 Before this, the app could *install* a setup but not *find* one: the only route
 to a team setup was open the browser, find it, click Equip. This is the shelf.
 
-### `GET /api/device/setups?scope=<mine|team>`
+### `GET /api/device/setups?scope=<mine|team|browse>`
 
 - `Authorization: Bearer <device token>` — same resolver as §3.
-- `scope` defaults to `mine`; anything but `mine`/`team` → `400`.
+- `scope` defaults to `mine`; anything else in the list above → `400`.
   - `mine` — setups owned by the token's user, newest-updated first
     (`coalesce(updatedAt, createdAt)` desc).
   - `team` — the private vaults of **every** team the user belongs to, merged,
     most-recently-added first. Membership is re-checked server-side; a
     non-member gets an empty list, never someone else's vault.
+  - `browse` — the public feed: every setup the signed-in user could open on
+    the site, newest first, with `featured: true` on the setup of the week
+    (at most one). Drives the Install tab's shelf.
 
 Response `200`:
 
@@ -459,7 +462,8 @@ Response `200`:
       "sim": "acc",                  // "iracing" | "acc" | "lmu"
       "car": "Ferrari 296 GT3",      // DISPLAY names here, not folder ids
       "track": "Spa-Francorchamps",  // null if the setup has no track
-      "updatedAt": "2026-08-01T10:22:00.000Z"
+      "updatedAt": "2026-08-01T10:22:00.000Z",
+      "featured": false            // setup of the week; `browse` scope only
     }
   ]
 }
@@ -474,6 +478,8 @@ Response `200`:
 - Listing grants nothing: every Install still goes through §5, which runs the
   same `assertSetupAccess` check a browser session gets. This endpoint can only
   ever narrow what the user already had access to.
+- **`featured` is optional**: omit it and the client renders an unfeatured
+  list, so `browse` can ship before the setup-of-the-week pick exists.
 - Errors are JSON like the rest of the device API: `400` bad scope, `401`
   bad/revoked token, `429` rate-limited, `500` otherwise. The client maps 401
   to its reconnect hint and shows the rest verbatim.
