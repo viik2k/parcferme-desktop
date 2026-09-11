@@ -1,0 +1,715 @@
+{
+ "Adrien Closmenil": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 4,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  }
+ ],
+ "Andrew Gilbert": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.3400000035762787
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.29411765933036804
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.24705883860588074
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.20000001788139343
+  },
+  {
+   "lap": 4,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.15294118225574493
+  }
+ ],
+ "Conrad Laursen": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.3199999928474426
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.27450981736183167
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.22745099663734436
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.18039216101169586
+  }
+ ],
+ "Duncan Cameron": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.33000001311302185
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.2862745225429535
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.2392157018184662
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.1882353127002716
+  }
+ ],
+ "Erwan Bastard": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.3799999952316284
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.3333333432674408
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.2862745225429535
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.2392157018184662
+  },
+  {
+   "lap": 4,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.1882353127002716
+  }
+ ],
+ "Finn Idagi": [
+  {
+   "fuel": 0.5,
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "tyres": [
+    97.64706420898438,
+    98.03921508789062,
+    97.64706420898438,
+    97.64706420898438
+   ],
+   "ve": 0.0
+  },
+  {
+   "fuel": 0.46666669845581055,
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "tyres": [
+    97.64706420898438,
+    98.03921508789062,
+    97.64706420898438,
+    97.64706420898438
+   ],
+   "ve": 0.0
+  },
+  {
+   "fuel": 0.43137258291244507,
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "tyres": [
+    96.47058868408203,
+    96.86274719238281,
+    96.86274719238281,
+    96.86274719238281
+   ],
+   "ve": 0.0
+  },
+  {
+   "fuel": 0.40000003576278687,
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "tyres": [
+    95.29412078857422,
+    95.686279296875,
+    95.686279296875,
+    96.07843017578125
+   ],
+   "ve": 0.0
+  },
+  {
+   "fuel": 0.501960813999176,
+   "lap": 4,
+   "pit": false,
+   "stint": 1,
+   "tyres": [
+    100.0,
+    100.0,
+    100.0,
+    100.0
+   ],
+   "ve": 0.0
+  }
+ ],
+ "Gianmaria Bruni": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.3199999928474426
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.27450981736183167
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.22745099663734436
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.18039216101169586
+  }
+ ],
+ "Ian Aguilera": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  }
+ ],
+ "Jean-Baptiste Lahaye": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  }
+ ],
+ "Marius Fossard": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 4,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  }
+ ],
+ "Martin Berry": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.3700000047683716
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.32549020648002625
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.27450981736183167
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.22745099663734436
+  },
+  {
+   "lap": 4,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.18039216101169586
+  }
+ ],
+ "Matteo Cressoni": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.3199999928474426
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.27450981736183167
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.22745099663734436
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.1764705926179886
+  }
+ ],
+ "Michael Birch": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.36000001430511475
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.3137255012989044
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.2666666805744171
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.21568629145622253
+  }
+ ],
+ "Nick Adcock": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 4,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  }
+ ],
+ "Quentin Antonel": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  }
+ ],
+ "Riccardo Agostini": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.33000001311302185
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.2862745225429535
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.2392157018184662
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.1882353127002716
+  }
+ ],
+ "Rik Koen": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 4,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  }
+ ],
+ "Rui Andrade": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.27000001072883606
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.22352942824363708
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.1764705926179886
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.125490203499794
+  }
+ ],
+ "Sarah Bovy": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.28999999165534973
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.24313727021217346
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.19607844948768616
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.14901961386203766
+  }
+ ],
+ "Takeshi Kimura": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.30000001192092896
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.2549019753932953
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.20784315466880798
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.16078431904315948
+  }
+ ],
+ "Tim Creswick": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  }
+ ],
+ "Tom Fleming": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.27000001072883606
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.22352942824363708
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.1764705926179886
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.12941177189350128
+  }
+ ],
+ "Torsten Kratz": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  }
+ ],
+ "Wyatt Brichacek": [
+  {
+   "lap": 0,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 1,
+   "pit": true,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 2,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 3,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  },
+  {
+   "lap": 4,
+   "pit": false,
+   "stint": 1,
+   "ve": 0.0
+  }
+ ]
+}

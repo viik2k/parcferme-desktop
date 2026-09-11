@@ -9,7 +9,10 @@ export interface Settings {
   /** Per-sim folder overrides keyed by sim id ("iracing" | "acc" | "lmu"). */
   simFolders: Record<string, string>;
   conflictPolicy: ConflictPolicy;
+  /** Run the sync engine: record every LMU session and push it automatically. */
+  syncEnabled: boolean;
 }
+
 
 /** What a download does when the file already exists with different bytes. */
 export type ConflictPolicy = "keep_both" | "overwrite";

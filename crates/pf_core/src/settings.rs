@@ -47,6 +47,10 @@ pub struct Settings {
     pub sim_folders: HashMap<Sim, PathBuf>,
     /// What to do when a downloaded file collides with an existing name.
     pub conflict_policy: ConflictPolicy,
+    /// Run the sync engine ([`crate::sync`]): record every LMU session and
+    /// push it to parcferme.cc automatically. Off until the user opts in —
+    /// this one uploads their driving.
+    pub sync_enabled: bool,
 }
 
 impl Settings {
@@ -174,6 +178,7 @@ mod tests {
         assert!(json.contains("\"simFolders\""), "{json}");
         assert!(json.contains("\"iracing\""), "{json}");
         assert!(json.contains("\"conflictPolicy\":\"keep_both\""), "{json}");
+        assert!(json.contains("\"syncEnabled\":false"), "{json}");
     }
 
     #[test]

@@ -181,6 +181,10 @@ pub struct SetupSummary {
     pub track: Option<String>,
     #[serde(default, rename = "updatedAt")]
     pub updated_at: Option<String>,
+    /// Setup of the week. Only the `browse` scope ever sets it; defaults false
+    /// so a server that predates the flag just yields an unfeatured list.
+    #[serde(default)]
+    pub featured: bool,
 }
 
 /// Wire envelope of the browse list; `items` defaults so an empty body reads
@@ -438,6 +442,74 @@ impl ApiClient {
         }
     }
 
+    /// Create a pending telemetry session and get a presigned PUT for its
+    /// bytes (SERVER_CONTRACT §10, call 1 of 3).
+    pub fn create_telemetry(&self, token: &str, meta: &TelemetryMeta) -> Result<TelemetryUpload> {
+        match self
+            .agent
+            .post(&self.url("/api/device/telemetry"))
+            .set("Authorization", &format!("Bearer {token}"))
+            .send_json(meta)
+        {
+            Ok(resp) => read_json(resp),
+            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(ureq::Error::Status(403, _)) => Err(Error::Api(
+                "the server refused this session — your account may not be allowed to share telemetry"
+                    .to_string(),
+            )),
+            Err(ureq::Error::Status(413, _)) => Err(Error::Api(
+                "the server rejected the recording as too large".to_string(),
+            )),
+            Err(ureq::Error::Status(code, resp)) => Err(api_error("share", code, resp)),
+            Err(e) => Err(map_transport(e)),
+        }
+    }
+
+    /// PUT the gzipped session straight to storage (§10, call 2 of 3).
+    ///
+    /// No `Authorization` header: the signature in the URL is the auth, and
+    /// sending a bearer token to a third-party origin would leak it. The URL
+    /// itself is a secret — never log it.
+    pub fn put_presigned(&self, url: &str, bytes: &[u8]) -> Result<()> {
+        match self
+            .agent
+            .put(url)
+            .set("Content-Type", "application/gzip")
+            .send_bytes(bytes)
+        {
+            Ok(_) => Ok(()),
+            Err(ureq::Error::Status(403, _)) => Err(Error::Api(
+                "the upload link expired before the session finished uploading — try again"
+                    .to_string(),
+            )),
+            Err(ureq::Error::Status(code, resp)) => Err(api_error("upload", code, resp)),
+            Err(e) => Err(map_transport(e)),
+        }
+    }
+
+    /// Mark the session complete, which is what makes it visible on the site
+    /// (§10, call 3 of 3).
+    pub fn complete_telemetry(&self, token: &str, id: &str) -> Result<UploadResult> {
+        match self
+            .agent
+            .post(&self.url(&format!("/api/device/telemetry/{id}/complete")))
+            .set("Authorization", &format!("Bearer {token}"))
+            .send_string("")
+        {
+            Ok(resp) => {
+                let wire: UploadResultWire = read_json(resp)?;
+                let url = match wire.url {
+                    Some(url) => self.absolutize(url),
+                    None => format!("{}/telemetry/{}", self.base_url, wire.id),
+                };
+                Ok(UploadResult { id: wire.id, url })
+            }
+            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(ureq::Error::Status(code, resp)) => Err(api_error("share", code, resp)),
+            Err(e) => Err(map_transport(e)),
+        }
+    }
+
     /// Attach an iRacing garage export to a setup that is already on the site
     /// (SERVER_CONTRACT §7b).
     ///
@@ -519,6 +591,35 @@ fn map_token_error(code: &str) -> TokenPoll {
 
 fn map_transport(err: ureq::Error) -> Error {
     Error::Http(err.to_string())
+}
+
+/// Metadata for a telemetry session (SERVER_CONTRACT §10). `car` and `track`
+/// are the game's own names, not folder ids — a live session has no folder.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelemetryMeta {
+    pub sim: &'static str,
+    pub car: String,
+    pub track: String,
+    pub started_unix: u64,
+    pub duration_s: f64,
+    pub frames: u64,
+    pub hz: f64,
+    pub best_lap_s: Option<f64>,
+    pub filename: String,
+    /// Compressed size — what the PUT will actually send.
+    pub bytes: u64,
+    pub content_encoding: &'static str,
+    pub private: bool,
+}
+
+/// The pending session and where to put its bytes.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelemetryUpload {
+    pub id: String,
+    /// Presigned PUT. A secret — never logged.
+    pub upload_url: String,
 }
 
 /// A non-2xx from the device API as a user-facing [`Error::Api`], appending the

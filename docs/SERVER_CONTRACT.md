@@ -438,15 +438,18 @@ publishing the draft release is the whole "ship" step.
 Before this, the app could *install* a setup but not *find* one: the only route
 to a team setup was open the browser, find it, click Equip. This is the shelf.
 
-### `GET /api/device/setups?scope=<mine|team>`
+### `GET /api/device/setups?scope=<mine|team|browse>`
 
 - `Authorization: Bearer <device token>` — same resolver as §3.
-- `scope` defaults to `mine`; anything but `mine`/`team` → `400`.
+- `scope` defaults to `mine`; anything else in the list above → `400`.
   - `mine` — setups owned by the token's user, newest-updated first
     (`coalesce(updatedAt, createdAt)` desc).
   - `team` — the private vaults of **every** team the user belongs to, merged,
     most-recently-added first. Membership is re-checked server-side; a
     non-member gets an empty list, never someone else's vault.
+  - `browse` — the public feed: every setup the signed-in user could open on
+    the site, newest first, with `featured: true` on the setup of the week
+    (at most one). Drives the Install tab's shelf.
 
 Response `200`:
 
@@ -459,7 +462,8 @@ Response `200`:
       "sim": "acc",                  // "iracing" | "acc" | "lmu"
       "car": "Ferrari 296 GT3",      // DISPLAY names here, not folder ids
       "track": "Spa-Francorchamps",  // null if the setup has no track
-      "updatedAt": "2026-08-01T10:22:00.000Z"
+      "updatedAt": "2026-08-01T10:22:00.000Z",
+      "featured": false            // setup of the week; `browse` scope only
     }
   ]
 }
@@ -474,12 +478,124 @@ Response `200`:
 - Listing grants nothing: every Install still goes through §5, which runs the
   same `assertSetupAccess` check a browser session gets. This endpoint can only
   ever narrow what the user already had access to.
+- **`featured` is optional**: omit it and the client renders an unfeatured
+  list, so `browse` can ship before the setup-of-the-week pick exists.
 - Errors are JSON like the rest of the device API: `400` bad scope, `401`
   bad/revoked token, `429` rate-limited, `500` otherwise. The client maps 401
   to its reconnect hint and shows the rest verbatim.
+
+## 10. Telemetry sessions — share a recorded session from the desktop
+
+The free-tier telemetry client (LMU) records every session it watches to a
+JSON-Lines file on the user's own machine. This section is how one of those
+files becomes a shared session on parcferme.cc.
+
+Two differences from §7 shape the design, and both are about size: a session is
+**10–200 MB before compression** (one merged frame at 10 Hz, ~600 bytes a
+frame), and a user may share several a night. So the bytes never pass through
+the app server — the route hands back a presigned R2 URL and the client PUTs
+straight to the bucket, the same pattern the website's own upload path already
+uses via tRPC `createSignedUrl`. §7's "stream the body through the route" only
+works there because setups cap at 2 MB.
+
+Three calls: create → PUT → complete.
+
+### `POST /api/device/telemetry`
+
+- `Authorization: Bearer <device token>` — same resolver as §3, same
+  `bannedUntil` → `403` and `checkRateLimit(moderateLimiter,
+  "device-telemetry:<userId>")` → `429` as `/api/device/setups/upload`.
+- `Content-Type: application/json`. Metadata rides in the **body**, not the
+  query string (§7 uses the query because its body is the file; here it isn't).
+  Times are **epoch seconds**, not ISO strings — `pf_core` carries no calendar
+  dependency, and `new Date(startedUnix * 1000)` is the server's whole cost.
+
+```jsonc
+{
+  "sim": "lmu",                    // required; "iracing" | "acc" | "lmu"
+  "car": "Ferrari 499P",           // required; free text, resolved like §7's `car`
+  "track": "Le Mans 24h",          // required; free text, resolved like §7's `track`
+  "startedUnix": 1757269211,       // required; seconds since the epoch, when recording began
+  "durationS": 2714.4,             // required; wall-clock length of the recording
+  "frames": 27144,                 // required; lines in the file
+  "hz": 10.0,                      // required; the rate the source was configured at
+  "bestLapS": 209.481,             // optional; null when no lap was completed
+  "filename": "session-1757269211.jsonl.gz",  // required; what the client is about to PUT
+  "bytes": 4181233,                // required; **compressed** size, what R2 will receive
+  "contentEncoding": "gzip",       // required for now; the client always gzips
+  "private": false                 // optional; true makes it owner-only
+}
+```
+
+`car` and `track` are **free text from the game**, not folder ids — this is the
+one place the desktop cannot send what §7 sends. Shared memory publishes
+`ScoringInfoV01::m_track_name` and the player's `m_vehicle_name`, which are
+display-ish strings ("Le Mans 24h", "Ferrari 499P"), and there is no live
+session equivalent of a setup's on-disk folder. Resolve them with the **same**
+`matchRow()` the upload route uses: `lmuTrackName()` first (it will miss for
+most live names), then the `normalize()` fallback (NFKD, strip marks, lowercase,
+alphanumeric) against `tracks.name` / `cars.name`. Keep the raw strings on the
+row either way, exactly as §7 does, so nothing is lost when a name doesn't
+resolve — an unmatched car must **not** 422 the way a setup upload does. A
+session with a raw name still has value; a session the user can't share does
+not.
+
+Response `200/201`:
+
+```jsonc
+{
+  "id": "<telemetry session uuid>",   // required
+  "uploadUrl": "https://…r2…?X-Amz-Signature=…",  // required; presigned PUT, ≥10 min TTL
+  "url": "https://parcferme.cc/telemetry/<uuid>"  // optional; client synthesizes from `id`
+}
+```
+
+### `PUT <uploadUrl>`
+
+Straight to R2, no `Authorization` header (the signature is the auth). Body is
+the gzipped `.jsonl`, `Content-Type: application/gzip`. The client sends exactly
+the `bytes` it declared. Sign the URL for `PUT` only, scoped to the one key the
+route chose — never let the client name the key.
+
+### `POST /api/device/telemetry/{id}/complete`
+
+Bearer auth again. Empty body. Marks the row visible.
+
+The row created by the first call is **pending and invisible** until this lands.
+Without it a cancelled or failed PUT leaves a session row pointing at an object
+that was never written, and the site has no way to tell that from a slow upload.
+A pending row older than an hour is safe to reap.
+
+Response `200`: `{ "id": "<uuid>", "url": "https://parcferme.cc/telemetry/<uuid>" }`.
+
+### Errors
+
+JSON like the rest of the device API: `401` bad/revoked token · `403` sharing
+not permitted for this user · `413` declared `bytes` over the server's cap ·
+`422` invalid metadata (missing required field, unparseable `startedUnix`) ·
+`429` rate-limited. The client maps 401 to its reconnect hint and surfaces the
+rest verbatim, so a `{ "error": "…" }` body with a human-readable message is
+worth returning.
+
+### Notes for the server side
+
+- **Storage.** Sessions are the largest thing this product stores by an order of
+  magnitude. Worth a per-user quota and a retention policy on free accounts
+  before this ships, not after — R2 cost is already on the watch list.
+- **The file format is the client's `Frame`, serialized.** One JSON object per
+  line, snake_case, units already normalised (°C, seconds, litres, km/h, 0–1
+  fractions), corner arrays FL/FR/RL/RR. It is `pf_core::lmu::Frame` and it will
+  gain fields; parse it tolerantly and pin nothing to field order.
+- **Don't parse it in the request path.** Whatever the site derives from a
+  session (lap splits, a trace, a leaderboard row) is a background job reading
+  from R2, not work done while the desktop waits.
+- **What the desktop does not do:** list, browse, or delete shared sessions.
+  Those are website pages; the client only produces. Add a device-side listing
+  only if the app ever needs to show "already shared" state.
 
 ## Client knobs
 
 - Base URL: `PARCFERME_API_URL` env (defaults to `https://parcferme.cc`).
 - Client id: `pf-desktop`. Scope: `setups:download`.
 - Deep-link scheme: `parcferme://equip?setup=<uuid>`.
+- Telemetry recordings: `%LOCALAPPDATA%\cc.parcferme.desktop\sessions\session-<unix>.jsonl`.

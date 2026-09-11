@@ -1,0 +1,1408 @@
+{
+ "currentWeather": {
+  "airPressure": 99.0,
+  "ambientTempKelvin": 286.15,
+  "cloudCoverage": 0.6993661974349004,
+  "humidity": 0.5,
+  "lightLevel": 1.0,
+  "rainIntensity": 0.0,
+  "raining": 0.0,
+  "trackTempKelvin": 292.1520248992202
+ },
+ "fuelInfo": {
+  "currentBattery": 0.0,
+  "currentFuel": 50.0,
+  "maxBattery": 0.0,
+  "maxFuel": 100.0
+ },
+ "pitMenu": {
+  "pitMenu": [
+   {
+    "PMC Value": 2,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "DAMAGE:",
+    "settings": [
+     {
+      "text": "N/A"
+     }
+    ]
+   },
+   {
+    "PMC Value": 5,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "DRIVER:",
+    "settings": [
+     {
+      "text": "F Idagi"
+     }
+    ]
+   },
+   {
+    "PMC Value": 7,
+    "currentSetting": 45,
+    "default": 45,
+    "name": "FUEL:",
+    "settings": [
+     {
+      "text": "5L/1 lap"
+     },
+     {
+      "text": "6L/1 lap"
+     },
+     {
+      "text": "7L/2 laps"
+     },
+     {
+      "text": "8L/2 laps"
+     },
+     {
+      "text": "9L/2 laps"
+     },
+     {
+      "text": "10L/2 laps"
+     },
+     {
+      "text": "11L/3 laps"
+     },
+     {
+      "text": "12L/3 laps"
+     },
+     {
+      "text": "13L/3 laps"
+     },
+     {
+      "text": "14L/4 laps"
+     },
+     {
+      "text": "15L/4 laps"
+     },
+     {
+      "text": "16L/4 laps"
+     },
+     {
+      "text": "17L/4 laps"
+     },
+     {
+      "text": "18L/5 laps"
+     },
+     {
+      "text": "19L/5 laps"
+     },
+     {
+      "text": "20L/5 laps"
+     },
+     {
+      "text": "21L/6 laps"
+     },
+     {
+      "text": "22L/6 laps"
+     },
+     {
+      "text": "23L/6 laps"
+     },
+     {
+      "text": "24L/7 laps"
+     },
+     {
+      "text": "25L/7 laps"
+     },
+     {
+      "text": "26L/7 laps"
+     },
+     {
+      "text": "27L/7 laps"
+     },
+     {
+      "text": "28L/8 laps"
+     },
+     {
+      "text": "29L/8 laps"
+     },
+     {
+      "text": "30L/8 laps"
+     },
+     {
+      "text": "31L/9 laps"
+     },
+     {
+      "text": "32L/9 laps"
+     },
+     {
+      "text": "33L/9 laps"
+     },
+     {
+      "text": "34L/9 laps"
+     },
+     {
+      "text": "35L/10 laps"
+     },
+     {
+      "text": "36L/10 laps"
+     },
+     {
+      "text": "37L/10 laps"
+     },
+     {
+      "text": "38L/11 laps"
+     },
+     {
+      "text": "39L/11 laps"
+     },
+     {
+      "text": "40L/11 laps"
+     },
+     {
+      "text": "41L/12 laps"
+     },
+     {
+      "text": "42L/12 laps"
+     },
+     {
+      "text": "43L/12 laps"
+     },
+     {
+      "text": "44L/12 laps"
+     },
+     {
+      "text": "45L/13 laps"
+     },
+     {
+      "text": "46L/13 laps"
+     },
+     {
+      "text": "47L/13 laps"
+     },
+     {
+      "text": "48L/14 laps"
+     },
+     {
+      "text": "49L/14 laps"
+     },
+     {
+      "text": "50L/14 laps"
+     },
+     {
+      "text": "51L/14 laps"
+     },
+     {
+      "text": "52L/15 laps"
+     },
+     {
+      "text": "53L/15 laps"
+     },
+     {
+      "text": "54L/15 laps"
+     },
+     {
+      "text": "55L/16 laps"
+     },
+     {
+      "text": "56L/16 laps"
+     },
+     {
+      "text": "57L/16 laps"
+     },
+     {
+      "text": "58L/17 laps"
+     },
+     {
+      "text": "59L/17 laps"
+     },
+     {
+      "text": "60L/17 laps"
+     },
+     {
+      "text": "61L/17 laps"
+     },
+     {
+      "text": "62L/18 laps"
+     },
+     {
+      "text": "63L/18 laps"
+     },
+     {
+      "text": "64L/18 laps"
+     },
+     {
+      "text": "65L/19 laps"
+     },
+     {
+      "text": "66L/19 laps"
+     },
+     {
+      "text": "67L/19 laps"
+     },
+     {
+      "text": "68L/19 laps"
+     },
+     {
+      "text": "69L/20 laps"
+     },
+     {
+      "text": "70L/20 laps"
+     },
+     {
+      "text": "71L/20 laps"
+     },
+     {
+      "text": "72L/21 laps"
+     },
+     {
+      "text": "73L/21 laps"
+     },
+     {
+      "text": "74L/21 laps"
+     },
+     {
+      "text": "75L/22 laps"
+     },
+     {
+      "text": "76L/22 laps"
+     },
+     {
+      "text": "77L/22 laps"
+     },
+     {
+      "text": "78L/22 laps"
+     },
+     {
+      "text": "79L/23 laps"
+     },
+     {
+      "text": "80L/23 laps"
+     },
+     {
+      "text": "81L/23 laps"
+     },
+     {
+      "text": "82L/24 laps"
+     },
+     {
+      "text": "83L/24 laps"
+     },
+     {
+      "text": "84L/24 laps"
+     },
+     {
+      "text": "85L/24 laps"
+     },
+     {
+      "text": "86L/25 laps"
+     },
+     {
+      "text": "87L/25 laps"
+     },
+     {
+      "text": "88L/25 laps"
+     },
+     {
+      "text": "89L/26 laps"
+     },
+     {
+      "text": "90L/26 laps"
+     },
+     {
+      "text": "91L/26 laps"
+     },
+     {
+      "text": "92L/27 laps"
+     },
+     {
+      "text": "93L/27 laps"
+     },
+     {
+      "text": "94L/27 laps"
+     },
+     {
+      "text": "95L/27 laps"
+     },
+     {
+      "text": "96L/28 laps"
+     },
+     {
+      "text": "97L/28 laps"
+     },
+     {
+      "text": "98L/28 laps"
+     },
+     {
+      "text": "99L/29 laps"
+     },
+     {
+      "text": "100L/29 laps"
+     }
+    ]
+   },
+   {
+    "PMC Value": 8,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "TIRES:",
+    "settings": [
+     {
+      "text": "No Change"
+     },
+     {
+      "isUsed": false,
+      "text": "New Medium ",
+      "type": "Medium"
+     },
+     {
+      "isUsed": false,
+      "text": "New Wet ",
+      "type": "Wet"
+     },
+     {
+      "isUsed": true,
+      "text": "Used Medium  0%",
+      "type": "Medium"
+     },
+     {
+      "isUsed": true,
+      "text": "Mixed Tyres",
+      "type": "Wet"
+     }
+    ]
+   },
+   {
+    "PMC Value": 13,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "FL TIRE:",
+    "settings": [
+     {
+      "text": "No Change"
+     },
+     {
+      "isUsed": false,
+      "text": "New Medium ",
+      "type": "Medium"
+     },
+     {
+      "isUsed": false,
+      "text": "New Wet ",
+      "type": "Wet"
+     },
+     {
+      "isUsed": true,
+      "text": "Used Medium  0%",
+      "type": "Medium"
+     }
+    ]
+   },
+   {
+    "PMC Value": 14,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "FR TIRE:",
+    "settings": [
+     {
+      "text": "No Change"
+     },
+     {
+      "isUsed": false,
+      "text": "New Medium ",
+      "type": "Medium"
+     },
+     {
+      "isUsed": false,
+      "text": "New Wet ",
+      "type": "Wet"
+     },
+     {
+      "isUsed": true,
+      "text": "Used Medium  0%",
+      "type": "Medium"
+     }
+    ]
+   },
+   {
+    "PMC Value": 15,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "RL TIRE:",
+    "settings": [
+     {
+      "text": "No Change"
+     },
+     {
+      "isUsed": false,
+      "text": "New Medium ",
+      "type": "Medium"
+     },
+     {
+      "isUsed": false,
+      "text": "New Wet ",
+      "type": "Wet"
+     },
+     {
+      "isUsed": true,
+      "text": "Used Medium  0%",
+      "type": "Medium"
+     }
+    ]
+   },
+   {
+    "PMC Value": 16,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "RR TIRE:",
+    "settings": [
+     {
+      "text": "No Change"
+     },
+     {
+      "isUsed": false,
+      "text": "New Medium ",
+      "type": "Medium"
+     },
+     {
+      "isUsed": false,
+      "text": "New Wet ",
+      "type": "Wet"
+     },
+     {
+      "isUsed": true,
+      "text": "Used Medium  0%",
+      "type": "Medium"
+     }
+    ]
+   },
+   {
+    "PMC Value": 20,
+    "currentSetting": 3,
+    "default": 3,
+    "name": "R WING:",
+    "settings": [
+     {
+      "text": "6.5 deg (-3)"
+     },
+     {
+      "text": "7.5 deg (-2)"
+     },
+     {
+      "text": "8.5 deg (-1)"
+     },
+     {
+      "text": "9.5 deg"
+     },
+     {
+      "text": "10.5 deg (+1)"
+     },
+     {
+      "text": "11.5 deg (+2)"
+     },
+     {
+      "text": "12.5 deg (+3)"
+     },
+     {
+      "text": "13.5 deg (+4)"
+     },
+     {
+      "text": "14.5 deg (+5)"
+     },
+     {
+      "text": "15.5 deg (+6)"
+     },
+     {
+      "text": "16.5 deg (+7)"
+     },
+     {
+      "text": "17.5 deg (+8)"
+     },
+     {
+      "text": "18.5 deg (+9)"
+     },
+     {
+      "text": "19.5 deg (+10)"
+     },
+     {
+      "text": "20.5 deg (+11)"
+     }
+    ]
+   },
+   {
+    "PMC Value": 22,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "GRILLE:",
+    "settings": [
+     {
+      "text": "1"
+     },
+     {
+      "text": "2 (+1)"
+     },
+     {
+      "text": "3 (+2)"
+     },
+     {
+      "text": "4 (+3)"
+     },
+     {
+      "text": "5 (+4)"
+     }
+    ]
+   },
+   {
+    "PMC Value": 25,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "FL PRESS:",
+    "settings": [
+     {
+      "text": "150"
+     },
+     {
+      "text": "151 (+1)"
+     },
+     {
+      "text": "152 (+2)"
+     },
+     {
+      "text": "153 (+3)"
+     },
+     {
+      "text": "154 (+4)"
+     },
+     {
+      "text": "155 (+5)"
+     },
+     {
+      "text": "156 (+6)"
+     },
+     {
+      "text": "157 (+7)"
+     },
+     {
+      "text": "158 (+8)"
+     },
+     {
+      "text": "159 (+9)"
+     },
+     {
+      "text": "160 (+10)"
+     },
+     {
+      "text": "161 (+11)"
+     },
+     {
+      "text": "162 (+12)"
+     },
+     {
+      "text": "163 (+13)"
+     },
+     {
+      "text": "164 (+14)"
+     },
+     {
+      "text": "165 (+15)"
+     },
+     {
+      "text": "166 (+16)"
+     },
+     {
+      "text": "167 (+17)"
+     },
+     {
+      "text": "168 (+18)"
+     },
+     {
+      "text": "169 (+19)"
+     },
+     {
+      "text": "170 (+20)"
+     },
+     {
+      "text": "171 (+21)"
+     },
+     {
+      "text": "172 (+22)"
+     },
+     {
+      "text": "173 (+23)"
+     },
+     {
+      "text": "174 (+24)"
+     },
+     {
+      "text": "175 (+25)"
+     },
+     {
+      "text": "176 (+26)"
+     },
+     {
+      "text": "177 (+27)"
+     },
+     {
+      "text": "178 (+28)"
+     },
+     {
+      "text": "179 (+29)"
+     },
+     {
+      "text": "180 (+30)"
+     },
+     {
+      "text": "181 (+31)"
+     },
+     {
+      "text": "182 (+32)"
+     },
+     {
+      "text": "183 (+33)"
+     },
+     {
+      "text": "184 (+34)"
+     },
+     {
+      "text": "185 (+35)"
+     },
+     {
+      "text": "186 (+36)"
+     },
+     {
+      "text": "187 (+37)"
+     },
+     {
+      "text": "188 (+38)"
+     },
+     {
+      "text": "189 (+39)"
+     },
+     {
+      "text": "190 (+40)"
+     },
+     {
+      "text": "191 (+41)"
+     },
+     {
+      "text": "192 (+42)"
+     },
+     {
+      "text": "193 (+43)"
+     },
+     {
+      "text": "194 (+44)"
+     },
+     {
+      "text": "195 (+45)"
+     },
+     {
+      "text": "196 (+46)"
+     }
+    ]
+   },
+   {
+    "PMC Value": 26,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "FR PRESS:",
+    "settings": [
+     {
+      "text": "150"
+     },
+     {
+      "text": "151 (+1)"
+     },
+     {
+      "text": "152 (+2)"
+     },
+     {
+      "text": "153 (+3)"
+     },
+     {
+      "text": "154 (+4)"
+     },
+     {
+      "text": "155 (+5)"
+     },
+     {
+      "text": "156 (+6)"
+     },
+     {
+      "text": "157 (+7)"
+     },
+     {
+      "text": "158 (+8)"
+     },
+     {
+      "text": "159 (+9)"
+     },
+     {
+      "text": "160 (+10)"
+     },
+     {
+      "text": "161 (+11)"
+     },
+     {
+      "text": "162 (+12)"
+     },
+     {
+      "text": "163 (+13)"
+     },
+     {
+      "text": "164 (+14)"
+     },
+     {
+      "text": "165 (+15)"
+     },
+     {
+      "text": "166 (+16)"
+     },
+     {
+      "text": "167 (+17)"
+     },
+     {
+      "text": "168 (+18)"
+     },
+     {
+      "text": "169 (+19)"
+     },
+     {
+      "text": "170 (+20)"
+     },
+     {
+      "text": "171 (+21)"
+     },
+     {
+      "text": "172 (+22)"
+     },
+     {
+      "text": "173 (+23)"
+     },
+     {
+      "text": "174 (+24)"
+     },
+     {
+      "text": "175 (+25)"
+     },
+     {
+      "text": "176 (+26)"
+     },
+     {
+      "text": "177 (+27)"
+     },
+     {
+      "text": "178 (+28)"
+     },
+     {
+      "text": "179 (+29)"
+     },
+     {
+      "text": "180 (+30)"
+     },
+     {
+      "text": "181 (+31)"
+     },
+     {
+      "text": "182 (+32)"
+     },
+     {
+      "text": "183 (+33)"
+     },
+     {
+      "text": "184 (+34)"
+     },
+     {
+      "text": "185 (+35)"
+     },
+     {
+      "text": "186 (+36)"
+     },
+     {
+      "text": "187 (+37)"
+     },
+     {
+      "text": "188 (+38)"
+     },
+     {
+      "text": "189 (+39)"
+     },
+     {
+      "text": "190 (+40)"
+     },
+     {
+      "text": "191 (+41)"
+     },
+     {
+      "text": "192 (+42)"
+     },
+     {
+      "text": "193 (+43)"
+     },
+     {
+      "text": "194 (+44)"
+     },
+     {
+      "text": "195 (+45)"
+     },
+     {
+      "text": "196 (+46)"
+     }
+    ]
+   },
+   {
+    "PMC Value": 27,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "RL PRESS:",
+    "settings": [
+     {
+      "text": "130"
+     },
+     {
+      "text": "131 (+1)"
+     },
+     {
+      "text": "132 (+2)"
+     },
+     {
+      "text": "133 (+3)"
+     },
+     {
+      "text": "134 (+4)"
+     },
+     {
+      "text": "135 (+5)"
+     },
+     {
+      "text": "136 (+6)"
+     },
+     {
+      "text": "137 (+7)"
+     },
+     {
+      "text": "138 (+8)"
+     },
+     {
+      "text": "139 (+9)"
+     },
+     {
+      "text": "140 (+10)"
+     },
+     {
+      "text": "141 (+11)"
+     },
+     {
+      "text": "142 (+12)"
+     },
+     {
+      "text": "143 (+13)"
+     },
+     {
+      "text": "144 (+14)"
+     },
+     {
+      "text": "145 (+15)"
+     },
+     {
+      "text": "146 (+16)"
+     },
+     {
+      "text": "147 (+17)"
+     },
+     {
+      "text": "148 (+18)"
+     },
+     {
+      "text": "149 (+19)"
+     },
+     {
+      "text": "150 (+20)"
+     },
+     {
+      "text": "151 (+21)"
+     },
+     {
+      "text": "152 (+22)"
+     },
+     {
+      "text": "153 (+23)"
+     },
+     {
+      "text": "154 (+24)"
+     },
+     {
+      "text": "155 (+25)"
+     },
+     {
+      "text": "156 (+26)"
+     },
+     {
+      "text": "157 (+27)"
+     },
+     {
+      "text": "158 (+28)"
+     },
+     {
+      "text": "159 (+29)"
+     },
+     {
+      "text": "160 (+30)"
+     },
+     {
+      "text": "161 (+31)"
+     },
+     {
+      "text": "162 (+32)"
+     },
+     {
+      "text": "163 (+33)"
+     },
+     {
+      "text": "164 (+34)"
+     },
+     {
+      "text": "165 (+35)"
+     },
+     {
+      "text": "166 (+36)"
+     },
+     {
+      "text": "167 (+37)"
+     },
+     {
+      "text": "168 (+38)"
+     },
+     {
+      "text": "169 (+39)"
+     },
+     {
+      "text": "170 (+40)"
+     },
+     {
+      "text": "171 (+41)"
+     },
+     {
+      "text": "172 (+42)"
+     },
+     {
+      "text": "173 (+43)"
+     },
+     {
+      "text": "174 (+44)"
+     },
+     {
+      "text": "175 (+45)"
+     },
+     {
+      "text": "176 (+46)"
+     }
+    ]
+   },
+   {
+    "PMC Value": 28,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "RR PRESS:",
+    "settings": [
+     {
+      "text": "130"
+     },
+     {
+      "text": "131 (+1)"
+     },
+     {
+      "text": "132 (+2)"
+     },
+     {
+      "text": "133 (+3)"
+     },
+     {
+      "text": "134 (+4)"
+     },
+     {
+      "text": "135 (+5)"
+     },
+     {
+      "text": "136 (+6)"
+     },
+     {
+      "text": "137 (+7)"
+     },
+     {
+      "text": "138 (+8)"
+     },
+     {
+      "text": "139 (+9)"
+     },
+     {
+      "text": "140 (+10)"
+     },
+     {
+      "text": "141 (+11)"
+     },
+     {
+      "text": "142 (+12)"
+     },
+     {
+      "text": "143 (+13)"
+     },
+     {
+      "text": "144 (+14)"
+     },
+     {
+      "text": "145 (+15)"
+     },
+     {
+      "text": "146 (+16)"
+     },
+     {
+      "text": "147 (+17)"
+     },
+     {
+      "text": "148 (+18)"
+     },
+     {
+      "text": "149 (+19)"
+     },
+     {
+      "text": "150 (+20)"
+     },
+     {
+      "text": "151 (+21)"
+     },
+     {
+      "text": "152 (+22)"
+     },
+     {
+      "text": "153 (+23)"
+     },
+     {
+      "text": "154 (+24)"
+     },
+     {
+      "text": "155 (+25)"
+     },
+     {
+      "text": "156 (+26)"
+     },
+     {
+      "text": "157 (+27)"
+     },
+     {
+      "text": "158 (+28)"
+     },
+     {
+      "text": "159 (+29)"
+     },
+     {
+      "text": "160 (+30)"
+     },
+     {
+      "text": "161 (+31)"
+     },
+     {
+      "text": "162 (+32)"
+     },
+     {
+      "text": "163 (+33)"
+     },
+     {
+      "text": "164 (+34)"
+     },
+     {
+      "text": "165 (+35)"
+     },
+     {
+      "text": "166 (+36)"
+     },
+     {
+      "text": "167 (+37)"
+     },
+     {
+      "text": "168 (+38)"
+     },
+     {
+      "text": "169 (+39)"
+     },
+     {
+      "text": "170 (+40)"
+     },
+     {
+      "text": "171 (+41)"
+     },
+     {
+      "text": "172 (+42)"
+     },
+     {
+      "text": "173 (+43)"
+     },
+     {
+      "text": "174 (+44)"
+     },
+     {
+      "text": "175 (+45)"
+     },
+     {
+      "text": "176 (+46)"
+     }
+    ]
+   },
+   {
+    "PMC Value": 33,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "F BRAKE DUCT:",
+    "settings": [
+     {
+      "text": "Open"
+     },
+     {
+      "text": "33%"
+     },
+     {
+      "text": "66%"
+     },
+     {
+      "text": "Closed"
+     }
+    ]
+   },
+   {
+    "PMC Value": 34,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "R BRAKE DUCT:",
+    "settings": [
+     {
+      "text": "Open"
+     },
+     {
+      "text": "33%"
+     },
+     {
+      "text": "66%"
+     },
+     {
+      "text": "Closed"
+     }
+    ]
+   },
+   {
+    "PMC Value": 35,
+    "currentSetting": 0,
+    "default": 0,
+    "name": "REPLACE BRAKES:",
+    "settings": [
+     {
+      "text": "No"
+     },
+     {
+      "text": "Yes"
+     }
+    ]
+   }
+  ]
+ },
+ "pitRecommendations": {
+  "FL TIRE:": 0,
+  "FR TIRE:": 0,
+  "RL TIRE:": 0,
+  "RR TIRE:": 0,
+  "TIRES:": 0,
+  "fuel": 0,
+  "virtualEnergy": 0
+ },
+ "pitStopLength": {
+  "timeInSeconds": 0.0
+ },
+ "pitStopTimes": {
+  "times": {
+   "BrakeChange": 120.0,
+   "BrakeTimeConcurrent": 0.0,
+   "DriverChange": 25.0,
+   "DriverConcurrent": 1.0,
+   "DriverDamage": 1.0,
+   "DriverRandom": 3.0,
+   "FenderFlareAdjust": 0.0,
+   "FixAeroDamage": 25.0,
+   "FixAllDamage": 25.0,
+   "FixRandomDelay": 5.0,
+   "FixTimeConcurrent": 0.0,
+   "FourTireChange": 12.0,
+   "FrontWingAdjust": 20.0,
+   "FrontWingReplace": 20.0,
+   "FuelFillRate": 2.8570001125335693,
+   "FuelInsert": 1.5,
+   "FuelRandomDelay": 3.0,
+   "FuelRemove": 0.8999999761581421,
+   "FuelTimeConcurrent": 1.0,
+   "OnTheFlyPressure": false,
+   "PressureChange": 5.0,
+   "RadiatorChange": 10.0,
+   "RandomBrakeDelay": 0.0,
+   "RandomTireDelay": 1.600000023841858,
+   "RearWingAdjust": 20.0,
+   "RearWingReplace": 50.0,
+   "SimultaneousStopGo": false,
+   "SpringRubberChange": 0.0,
+   "TireTimeConcurrent": 0.0,
+   "TrackBarChange": 0.0,
+   "TwoTireChange": 4.5,
+   "WedgeChange": 0.0,
+   "virtualEnergyFillRate": 0.02500000037252903,
+   "virtualEnergyInsert": 0.0,
+   "virtualEnergyRandomDelay": 0.0,
+   "virtualEnergyRemove": 0.0,
+   "virtualEnergyTimeConcurrent": 1.0
+  }
+ },
+ "racePosition": {
+  "gapToFirstInClassLaps": 0,
+  "gapToFirstInClassTime": 28.352235794067383,
+  "gapToLastInClassLaps": 0,
+  "gapToLastInClassTime": 0.0,
+  "placeInClass": 11,
+  "placeOverall": 11
+ },
+ "sessionTime": {
+  "timeOfDay": 45706.67578125
+ },
+ "teamInfo": {
+  "driverNames": [
+   [
+    70,
+    105,
+    110,
+    110,
+    32,
+    73,
+    100,
+    97,
+    103,
+    105,
+    0,
+    115,
+    111,
+    110,
+    45,
+    73,
+    100,
+    97,
+    103,
+    105,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  ],
+  "teamName": "ADESS Factory Racing Team 2025",
+  "vehicleName": "ADESS Factory Racing Team 2025 #46:LMU2"
+ },
+ "wearables": {
+  "body": {
+   "aero": 0.0,
+   "detachableParts": [
+    true,
+    true,
+    true,
+    true,
+    false,
+    true,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+   ]
+  },
+  "brakes": [
+   0.032,
+   0.032,
+   0.032,
+   0.032
+  ],
+  "suspension": [
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "tires": [
+   0.9521867609703095,
+   0.9571710220039343,
+   0.9564357119061094,
+   0.9605173269679046
+  ]
+ },
+ "weatherForecast": {
+  "nodes": {
+   "Duration": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "Humidity": [
+    82,
+    81,
+    78,
+    78,
+    79
+   ],
+   "RainChance": [
+    0,
+    0,
+    5,
+    0,
+    0
+   ],
+   "Sky": [
+    3,
+    3,
+    2,
+    1,
+    1
+   ],
+   "StartTime": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "Temperature": [
+    13,
+    13,
+    13,
+    13,
+    13
+   ],
+   "WindDirection": [
+    7,
+    7,
+    7,
+    7,
+    7
+   ],
+   "WindSpeed": [
+    1,
+    2,
+    1,
+    2,
+    1
+   ]
+  }
+ }
+}
