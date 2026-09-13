@@ -143,26 +143,24 @@ export function UploadPanel() {
     phase !== "working";
   const hint = error ? errorHint(error.kind) : null;
   const fieldClass =
-    "mt-1 w-full rounded-lg bg-background px-3 py-2 text-sm text-foreground ring-1 ring-border focus:outline-none focus:ring-primary";
+    "mt-1 w-full rounded-full bg-black/30 px-3 py-1.5 text-xs text-foreground ring-1 ring-border focus:outline-none focus:ring-primary/60";
 
   return (
-    <div className="rounded-2xl bg-card p-6 ring-1 ring-border">
-      <h2 className="text-base font-semibold">Push a setup</h2>
-      <p className="mt-1 text-sm text-muted">
-        Share a setup from your sim folder to parcferme.cc. Picking a file from
-        the setups folder fills in the car and track for you.
-        {options.cars.length > 0 && " Start typing to pick from the site's list."}
+    <div>
+      <p className="text-[11px] text-muted">
+        Share a setup from your sim folder. Picking a file fills in the car and
+        track for you.
       </p>
 
       <button
         onClick={() => void handlePick()}
-        className="mt-4 w-full rounded-lg px-3 py-2 text-sm text-muted ring-1 ring-border transition hover:text-foreground"
+        className="glass mt-2 w-full truncate rounded-full px-3 py-1.5 text-xs text-muted hover:bg-white/12 hover:text-foreground"
       >
         {filename ? filename : "Choose a setup file…"}
       </button>
 
       {path && (
-        <div className="mt-3 space-y-3 text-xs">
+        <div className="mt-3 space-y-2.5 text-[11px]">
           <label className="block">
             <span className="font-medium text-muted">Sim</span>
             <select
@@ -257,7 +255,7 @@ export function UploadPanel() {
               {garageExport ? (
                 <div className="mt-1 flex items-center gap-2">
                   <span
-                    className="flex-1 truncate rounded-lg bg-background px-3 py-2 text-foreground ring-1 ring-border"
+                    className="flex-1 truncate rounded-full bg-black/30 px-3 py-2 text-foreground ring-1 ring-border"
                     title={garageExport}
                   >
                     {garageExport.split(/[\\/]/).pop()}
@@ -265,7 +263,7 @@ export function UploadPanel() {
                   <button
                     type="button"
                     onClick={() => void handlePickExport()}
-                    className="rounded-lg px-3 py-2 text-muted ring-1 ring-border transition hover:text-foreground"
+                    className="rounded-full px-3 py-2 text-muted ring-1 ring-border hover:bg-white/8 hover:text-foreground"
                   >
                     Change
                   </button>
@@ -274,7 +272,7 @@ export function UploadPanel() {
                   <button
                     type="button"
                     onClick={() => setGarageExport(null)}
-                    className="rounded-lg px-3 py-2 text-muted ring-1 ring-border transition hover:text-foreground"
+                    className="rounded-full px-3 py-2 text-muted ring-1 ring-border hover:bg-white/8 hover:text-foreground"
                   >
                     Remove
                   </button>
@@ -283,7 +281,7 @@ export function UploadPanel() {
                 <button
                   type="button"
                   onClick={() => void handlePickExport()}
-                  className="mt-1 w-full rounded-lg px-3 py-2 text-muted ring-1 ring-border transition hover:text-foreground"
+                  className="mt-1 w-full rounded-full px-3 py-2 text-muted ring-1 ring-border hover:bg-white/8 hover:text-foreground"
                 >
                   Choose a garage export…
                 </button>
@@ -324,9 +322,9 @@ export function UploadPanel() {
                           on ? prev.filter((x) => x !== t) : [...prev, t],
                         )
                       }
-                      className={`rounded-lg px-3 py-1.5 text-xs capitalize ring-1 transition ${
+                      className={`rounded-full px-3 py-1.5 text-xs capitalize ring-1 ${
                         on
-                          ? "bg-primary text-primary-foreground ring-primary"
+                          ? "bg-primary text-primary-foreground ring-primary glow"
                           : "text-muted ring-border hover:text-foreground"
                       }`}
                     >
@@ -346,7 +344,7 @@ export function UploadPanel() {
               rows={3}
               maxLength={MAX_NOTES}
               placeholder="Tyre pressures, fuel load, anything the downloader should know."
-              className={`${fieldClass} resize-y`}
+              className={`${fieldClass} resize-y rounded-2xl`}
             />
           </label>
 
@@ -365,7 +363,7 @@ export function UploadPanel() {
           <button
             onClick={() => void handleUpload()}
             disabled={!canUpload}
-            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-full bg-primary glow px-3 py-2 text-xs font-semibold text-primary-foreground hover:brightness-110 disabled:opacity-50"
           >
             {phase === "working" ? (
               <>
@@ -379,16 +377,16 @@ export function UploadPanel() {
       )}
 
       {phase === "done" && result && (
-        <div className="mt-4 rounded-lg bg-success/10 px-3 py-2 text-sm text-success ring-1 ring-success/30">
+        <div className="mt-3 rounded-xl bg-success/10 px-3 py-2 text-xs text-success ring-1 ring-success/30">
           <p className="font-medium">Uploaded ✓</p>
           <button
             onClick={() => void openUrl(result.url)}
-            className="mt-1 break-all text-left text-xs text-success/80 underline transition hover:text-success"
+            className="mt-1 break-all text-left text-[10px] text-success/80 underline hover:text-success"
           >
             {result.url}
           </button>
           {result.export.status === "attached" && (
-            <p className="mt-1 text-xs text-success/80">
+            <p className="mt-1 text-[10px] text-success/80">
               Garage export attached — the setup has a readable view on the
               site.
             </p>
@@ -397,7 +395,7 @@ export function UploadPanel() {
               rather than the error one — but it must still be visible, because
               the setup is on the site permanently without its values. */}
           {result.export.status === "failed" && (
-            <p className="mt-1 text-xs text-muted">
+            <p className="mt-1 text-[10px] text-muted">
               Uploaded without the garage export: {result.export.message}
             </p>
           )}
@@ -405,9 +403,9 @@ export function UploadPanel() {
       )}
 
       {phase === "error" && error && (
-        <div className="mt-4 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive ring-1 ring-destructive/30">
+        <div className="mt-3 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive ring-1 ring-destructive/30">
           <p>{error.message}</p>
-          {hint && <p className="mt-1 text-xs text-destructive/80">{hint}</p>}
+          {hint && <p className="mt-1 text-[10px] text-destructive/80">{hint}</p>}
         </div>
       )}
     </div>

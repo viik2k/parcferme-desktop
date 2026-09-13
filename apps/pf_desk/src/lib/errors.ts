@@ -37,6 +37,10 @@ export function errorHint(kind: string): string | null {
       return "Ask the owner to share it with you on parcferme.cc.";
     case "setups_dir_not_found":
       return "Point ParcFerme at the right folder in Settings.";
+    case "lmu_not_running":
+      return "Start Le Mans Ultimate and get into a session, then try again.";
+    case "lmu_plugins_disabled":
+      return "In LMU: Settings > Gameplay > Enable Plugins, then fully restart the game.";
     case "network":
       return "Check your connection and try again in a moment.";
     case "invalid_link":

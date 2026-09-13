@@ -42,6 +42,12 @@ jobs:
           base=${latest#v}
           IFS='.' read -r major minor patch <<< "$base"
           next="$major.$minor.$((patch + 1))"
+          # A hand-set version ahead of the latest tag (e.g. a minor bump to
+          # 0.3.0 in Cargo.toml) wins over the auto patch bump.
+          current=$(grep -m1 -E '^version = "' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          if [ "$current" != "$base" ] && [ "$(printf '%s\n%s\n' "$base" "$current" | sort -V | tail -n1)" = "$current" ]; then
+            next="$current"
+          fi
           echo "next=$next" >> "$GITHUB_OUTPUT"
           echo "tag=v$next" >> "$GITHUB_OUTPUT"
           echo "Next release: v$next (previous highest tag: $latest)"
@@ -78,7 +84,10 @@ jobs:
           # skip marker would also suppress the tag-triggered release build. The
           # loop is broken by the `if:` guards instead (this job's chore(release)
           # check, and ci.yml skipping the bump commit's main push).
-          git commit -am "chore(release): $tag"
+          # A hand-set version leaves nothing to bump; tag the merge commit as-is.
+          if ! git diff --quiet; then
+            git commit -am "chore(release): $tag"
+            git push origin HEAD:main
+          fi
           git tag -a "$tag" -m "$tag"
-          git push origin HEAD:main
           git push origin "$tag"

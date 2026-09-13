@@ -36,6 +36,22 @@ pub enum Error {
     #[error("setup not found — it may have been deleted")]
     SetupNotFound,
 
+    /// The game isn't running. One liveness concept for both LMU channels: the
+    /// `Le Mans Ultimate.exe` process is absent, so neither the `LMU_Data`
+    /// mapping nor the localhost REST server can be there either.
+    #[error("Le Mans Ultimate isn't running — start the game and try again")]
+    LmuNotRunning,
+
+    /// The game *is* running but never published `LMU_Data`, which means the
+    /// plugin system is switched off. We cannot fix this for the user: it needs
+    /// a settings change **and a full restart of the game**, so the message has
+    /// to say exactly that rather than "not running".
+    #[error(
+        "Le Mans Ultimate is running but its shared memory is off — \
+         enable Settings > Gameplay > Enable Plugins, then restart the game"
+    )]
+    LmuPluginsDisabled,
+
     /// Transport-level HTTP failure (DNS, TLS, timeout, connection reset).
     #[error("network error: {0}")]
     Http(String),
@@ -74,6 +90,8 @@ impl Error {
             Error::DeviceRevoked => "device_revoked",
             Error::AccessDenied => "access_denied",
             Error::SetupNotFound => "setup_not_found",
+            Error::LmuNotRunning => "lmu_not_running",
+            Error::LmuPluginsDisabled => "lmu_plugins_disabled",
             Error::Http(_) => "network",
             Error::Api(_) => "api",
             Error::Keychain(_) => "keychain",
