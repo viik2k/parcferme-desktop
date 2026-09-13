@@ -3,13 +3,14 @@
 /* Brand tokens, mirrored from the parcferme.cc web app (globals.css) so the
    desktop client reads as the same product. */
 @theme {
-  --color-background: #0a0a0a;
-  --color-foreground: #e5e5e5;
-  --color-card: #1a1a1a;
-  --color-border: #262626;
-  --color-muted: #737373;
+  --color-background: #0b0b0e;
+  --color-foreground: #ededf0;
+  --color-card: rgba(255, 255, 255, 0.05);
+  --color-popover: #16161c;
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-muted: #a3a3ad;
   --color-primary: #f59e0b;
-  --color-primary-foreground: #0a0a0a;
+  --color-primary-foreground: #0b0b0e;
   --color-destructive: #ef4444;
   --color-success: #22c55e;
 }
@@ -23,6 +24,126 @@ body,
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
+  /* ponytail: the web app's ambient blobs, as two fixed radial gradients —
+     no DOM, no animation loop in a 400px window. */
+  background-image:
+    radial-gradient(
+      60% 50% at 12% 0%,
+      rgba(245, 158, 11, 0.1),
+      transparent 70%
+    ),
+    radial-gradient(
+      55% 45% at 100% 100%,
+      rgba(120, 120, 255, 0.08),
+      transparent 70%
+    );
+  background-attachment: fixed;
+}
+
+@layer base {
+  /* Tailwind v4 dropped the preflight rule that gave buttons a hand cursor. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  label[for],
+  summary,
+  select:not(:disabled),
+  [type="checkbox"]:not(:disabled),
+  [type="radio"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  select:disabled,
+  input:disabled,
+  textarea:disabled {
+    cursor: not-allowed;
+  }
+
+  /* One keyboard focus treatment for the whole app. */
+  :where(a, button, [role="button"], [tabindex]:not([tabindex="-1"]), input, select, textarea, summary):focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  /* Interactive elements fade their colours by default; zero-specificity
+     :where() so any transition-* utility on the element still wins. */
+  :where(a, button, [role="button"], summary, label[for], select) {
+    transition:
+      color 200ms ease,
+      background-color 200ms ease,
+      border-color 200ms ease,
+      box-shadow 200ms ease,
+      opacity 200ms ease;
+  }
+
+  ::selection {
+    background: var(--color-primary);
+    color: var(--color-primary-foreground);
+  }
+
+  /* Scrollbars, so panes stop rendering the OS default light track. */
+  * {
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.14);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.26);
+    background-clip: content-box;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :where(a, button, [role="button"], summary, label[for], select) {
+      transition-duration: 0s;
+    }
+  }
+}
+
+@layer utilities {
+  /* Glass surface, from the web app's globals.css. */
+  .glass {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.09),
+      rgba(255, 255, 255, 0.035)
+    );
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 24px 60px -28px rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(24px) saturate(160%);
+  }
+
+  /* Same treatment over a near-opaque base, for bars that sit above
+     scrolling content. */
+  .glass-bar {
+    background:
+      linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.07),
+        rgba(255, 255, 255, 0.02)
+      ),
+      rgba(12, 12, 16, 0.92);
+    backdrop-filter: blur(24px) saturate(160%);
+  }
+
+  /* Amber glow under the primary buttons. */
+  .glow {
+    box-shadow:
+      0 12px 30px -14px var(--color-primary),
+      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
 }
 
 /* Organic loader (src/components/OrganicLoader.tsx), ported from the web app. */

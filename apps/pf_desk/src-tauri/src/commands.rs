@@ -16,6 +16,7 @@ use pf_core::auth::{self, DeviceFlow, FlowOutcome};
 use pf_core::download::{self, InstallAction};
 use pf_core::settings::Settings;
 use pf_core::sim::Sim;
+use pf_core::sync;
 
 /// M0 smoke test: round-trip a message through `pf_core` and back to the UI.
 #[tauri::command]
@@ -472,4 +473,28 @@ pub fn run_equip(url: &str) -> EquipOutcome {
             message: e.to_string(),
         },
     }
+}
+
+// ---------------------------------------------------------------------------
+// Sync engine
+// ---------------------------------------------------------------------------
+
+/// What the engine is doing: the live recording, the upload queue, the last
+/// push. The engine runs on its own thread in `pf_core` and keeps no state
+/// here — this is a read, and the UI never drives it.
+#[tauri::command]
+pub async fn sync_status() -> Result<pf_core::sync::Status, CmdError> {
+    blocking(|| Ok(sync::status())).await
+}
+
+/// Reveal the sessions folder — the "where did my recordings go" answer, and
+/// the escape hatch when a push keeps failing.
+#[tauri::command]
+pub fn open_sessions_dir(app: tauri::AppHandle) -> Result<(), CmdError> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = pf_core::session::dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| CmdError::new("io", e.to_string()))?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| CmdError::new("io", e.to_string()))
 }

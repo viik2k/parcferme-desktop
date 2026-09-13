@@ -48,8 +48,8 @@ export function UpdateBanner() {
   if (state.kind === "hidden") return null;
 
   return (
-    <div className="w-full max-w-sm">
-      <div className="flex items-center justify-between gap-3 rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary ring-1 ring-primary/30">
+    <div className="mb-3">
+      <div className="flex items-center justify-between gap-3 rounded-xl bg-primary/10 px-3 py-2 text-xs text-primary ring-1 ring-primary/30">
         {state.kind === "available" && (
           <>
             <span>
@@ -57,7 +57,7 @@ export function UpdateBanner() {
             </span>
             <button
               onClick={() => install(state.update)}
-              className="shrink-0 rounded-md px-2 py-1 text-xs font-medium ring-1 ring-primary/40 transition hover:bg-primary/10"
+              className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-primary/40 hover:bg-primary/10"
             >
               Update
             </button>
@@ -77,7 +77,7 @@ export function UpdateBanner() {
             </span>
             <button
               onClick={() => void relaunch()}
-              className="shrink-0 rounded-md px-2 py-1 text-xs font-medium ring-1 ring-primary/40 transition hover:bg-primary/10"
+              className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-primary/40 hover:bg-primary/10"
             >
               Restart
             </button>
