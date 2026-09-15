@@ -252,6 +252,24 @@ export function SettingsPanel({
         </p>
       </div>
 
+      {/* Team auto-install */}
+      <div className="py-3">
+        <Label>Team setups</Label>
+        <Toggle
+          title="Install new team setups automatically"
+          detail="Every setup added to your teams' vaults is downloaded to your sim folder in the background."
+          checked={settings?.teamAutoInstallEnabled ?? false}
+          disabled={!settings}
+          onChange={() =>
+            settings &&
+            void persist({
+              ...settings,
+              teamAutoInstallEnabled: !settings.teamAutoInstallEnabled,
+            })
+          }
+        />
+      </div>
+
       {/* Startup */}
       <div className="py-3">
         <Label>Startup</Label>

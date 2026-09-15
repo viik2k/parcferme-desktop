@@ -13,7 +13,7 @@
 //! plus a warning in the log — a broken settings file must never brick an
 //! equip. Saves are atomic (temp + rename), same discipline as setup writes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -51,6 +51,17 @@ pub struct Settings {
     /// push it to parcferme.cc automatically. Off until the user opts in —
     /// this one uploads their driving.
     pub sync_enabled: bool,
+    /// Run the team auto-install engine ([`crate::team_sync`]): install new
+    /// team-vault setups automatically. Off until the user opts in — this one
+    /// writes files into their sim folders unattended.
+    pub team_auto_install_enabled: bool,
+    /// Whether the first team-vault poll has already run and seeded
+    /// `team_seen_setups` without installing anything. Distinct from an empty
+    /// seen-set, which just means the vault has nothing in it yet.
+    pub team_auto_install_seeded: bool,
+    /// Team-vault setup ids already installed (or seen on the seeding poll),
+    /// so a later poll never reinstalls one.
+    pub team_seen_setups: HashSet<String>,
 }
 
 impl Settings {
@@ -179,6 +190,9 @@ mod tests {
         assert!(json.contains("\"iracing\""), "{json}");
         assert!(json.contains("\"conflictPolicy\":\"keep_both\""), "{json}");
         assert!(json.contains("\"syncEnabled\":false"), "{json}");
+        assert!(json.contains("\"teamAutoInstallEnabled\":false"), "{json}");
+        assert!(json.contains("\"teamAutoInstallSeeded\":false"), "{json}");
+        assert!(json.contains("\"teamSeenSetups\":[]"), "{json}");
     }
 
     #[test]
