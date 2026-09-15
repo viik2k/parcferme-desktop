@@ -11,6 +11,8 @@ export interface Settings {
   conflictPolicy: ConflictPolicy;
   /** Run the sync engine: record every LMU session and push it automatically. */
   syncEnabled: boolean;
+  /** Install new team-vault setups automatically. */
+  teamAutoInstallEnabled: boolean;
 }
 
 

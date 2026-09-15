@@ -46,6 +46,38 @@ fn notify(
     app.notification().builder().title(title).body(body).show()
 }
 
+/// Turn newly installed team setups into OS notifications.
+///
+/// `pf_core::team_sync` deliberately has no Tauri dependency (see its own
+/// module doc and `pf_core`'s), so it can only report what it installed —
+/// this thread is what turns that into a toast, the same job `handle_equip`
+/// does for a manual equip. Polled rather than evented, same tradeoff as the
+/// Sync tab: a status read is a mutex and nothing else, far cheaper than a
+/// channel for something that fires a few times a day at most.
+fn team_sync_toasts(app: &tauri::AppHandle) {
+    use std::collections::HashSet;
+    // Local to this run: a fresh process starts with nothing toasted, and
+    // `pf_core::team_sync`'s own history is equally fresh, so there is
+    // nothing stale to replay on startup.
+    let mut toasted: HashSet<String> = HashSet::new();
+    loop {
+        for entry in pf_core::team_sync::status().recent {
+            if toasted.insert(entry.id.clone()) {
+                let where_ = match entry.track.as_deref() {
+                    Some(track) => format!("{} \u{b7} {track}", entry.car),
+                    None => entry.car.clone(),
+                };
+                let _ = notify(
+                    app,
+                    "Team setup installed",
+                    &format!("{} ({where_})", entry.name),
+                );
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+}
+
 /// Structured file logging (M4) to
 /// `%LOCALAPPDATA%\cc.parcferme.desktop\logs\pf-desk.log`, plus stdout in dev.
 /// `pf_core` logs at debug for support traces. **No secrets** — tokens and
@@ -233,6 +265,19 @@ pub fn run() {
             // user has turned it on in Settings. Its own thread, no shutdown —
             // recordings are flushed per frame, so process exit is safe.
             pf_core::sync::spawn();
+            // Team auto-install: installs new team-vault setups, when the
+            // user has turned it on in Settings. Same no-shutdown reasoning —
+            // an install is a single atomic write, never left half-done.
+            pf_core::team_sync::spawn();
+            {
+                let toast_handle = app.handle().clone();
+                if let Err(e) = std::thread::Builder::new()
+                    .name("pf-team-sync-toasts".into())
+                    .spawn(move || team_sync_toasts(&toast_handle))
+                {
+                    log::error!("team sync toast thread didn't start: {e}");
+                }
+            }
             // The window is created hidden (tauri.conf.json); autostart launches
             // stay in the tray, everything else (user launch, deep-link cold
             // start) shows it.
