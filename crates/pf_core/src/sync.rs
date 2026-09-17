@@ -218,9 +218,12 @@ fn record(source: &Lmu) {
 /// Push every recording on disk, oldest first, deleting each one the server
 /// has accepted.
 ///
-/// The first failure ends the sweep: they share one cause (offline, signed
-/// out, server down), and hammering the API once per file helps nobody. The
-/// files stay put and the next cycle tries again.
+/// `NotLinked` and `Http` end the sweep: they share one cause (offline,
+/// signed out, server down), and hammering the API once per file helps
+/// nobody. The files stay put and the next cycle tries again. `Api` is a
+/// per-file rejection (413, 403, 422, ...) that will not resolve by retrying
+/// — it is skipped so it cannot block every recording behind it, though the
+/// file itself is left on disk (retention policy is a separate question).
 fn push_pending() {
     let Ok(dir) = session::dir() else { return };
     let mut sessions = session::list();
@@ -245,6 +248,18 @@ fn push_pending() {
             Err(Error::NotLinked) => {
                 log::debug!("sync: signed out — {} waits", s.file);
                 return;
+            }
+            // A permanent per-file rejection: retrying it won't help, but it
+            // also isn't evidence anything is wrong with the other files in
+            // the queue, so the sweep keeps going.
+            Err(e @ Error::Api(_)) => {
+                log::warn!("sync: {} permanently rejected, skipping: {e}", s.file);
+                *lock(&LAST) = Some(LastPush {
+                    file: s.file,
+                    at_unix: now_unix(),
+                    url: None,
+                    error: Some(e.to_string()),
+                });
             }
             Err(e) => {
                 log::warn!("sync: couldn't push {}: {e}", s.file);
