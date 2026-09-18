@@ -21,7 +21,12 @@
 //! never escapes.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::mpsc::Receiver;
+// The channel pair is only wired up by the Windows `Lmu::start` (the
+// shared-memory half is the Windows-only reader, issue #35), so the imports
+// are gated with it rather than left dangling on a non-Windows build.
+#[cfg(windows)]
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -40,6 +45,7 @@ pub use rest::{ForecastNode, RestSnapshot};
 const G: f64 = 9.806_65;
 
 /// How long to block on the game's event before calling the interval a gap.
+#[cfg(windows)]
 const EVENT_WAIT: Duration = Duration::from_secs(1);
 
 /// How the two loops are paced.
@@ -232,6 +238,13 @@ impl Lmu {
     /// ([`crate::Error::LmuNotRunning`]) or is up without its plugin interface
     /// ([`crate::Error::LmuPluginsDisabled`]). Those are the only two liveness
     /// states, and the shared-memory side is the one that decides them.
+    ///
+    /// Windows-only in practice (issue #35): the game publishes `LMU_Data` as
+    /// win32 named kernel objects, which Proton never bridges into the Linux
+    /// namespace, so on any other host there is nothing to open and the
+    /// non-Windows arm below reports the same "not running" the sync loop
+    /// already treats as its normal idle state.
+    #[cfg(windows)]
     pub fn start(config: Config) -> Result<Self> {
         let reader = shm::Reader::open()?;
 
@@ -265,6 +278,23 @@ impl Lmu {
             started,
             threads,
         })
+    }
+
+    /// The non-Windows [`Lmu::start`] (issue #35): LMU live telemetry is
+    /// Windows-only, because the game publishes its shared-memory interface
+    /// as win32 named objects (`LMU_Data`, the data event, the lock) that
+    /// Proton never exposes in the Linux namespace — a native Linux process
+    /// has nothing to open even with the game running under Proton. Rather
+    /// than compile an unopenable reader, the arm reports the same
+    /// [`crate::Error::LmuNotRunning`] the sync loop already treats as its
+    /// normal "game is down" state, so callers need no platform branch.
+    ///
+    /// `config` is accepted and dropped to keep the signature identical to
+    /// the Windows arm: callers pass [`Config::default()` today, and keeping
+    /// one shape means a future Windows-only build cannot drift from it.
+    #[cfg(not(windows))]
+    pub fn start(_config: Config) -> Result<Self> {
+        Err(crate::Error::LmuNotRunning)
     }
 
     /// The next frame, or `None` once the game has exited and the source has
@@ -337,6 +367,10 @@ impl Drop for Lmu {
     }
 }
 
+// Dead on a non-Windows build (the only caller is the Windows `Lmu::start`,
+// issue #35) but kept un-gated so its logic — and the host-agnostic pacing
+// tests below — still compile and run on Linux.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn spawn_rest(
     config: &Config,
     shared: Arc<Mutex<RestShared>>,
@@ -374,6 +408,7 @@ fn spawn_rest(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(windows)]
 fn spawn_shm(
     config: &Config,
     mut reader: shm::Reader,
@@ -447,6 +482,10 @@ fn spawn_shm(
 }
 
 /// The interval between emitted frames.
+// Same dead-on-Linux situation as `spawn_rest`: only the Windows `Lmu::start`
+// chain calls it, but the pacing tests below are host-agnostic, so the logic
+// stays compiled everywhere (issue #35).
+#[cfg_attr(not(windows), allow(dead_code))]
 fn frame_period(target_hz: f64) -> Duration {
     // A nonsense rate must not divide by zero or ask for a frame every 0 ns.
     Duration::from_secs_f64(1.0 / target_hz.clamp(0.1, 1_000.0))
@@ -460,6 +499,7 @@ fn frame_period(target_hz: f64) -> Duration {
 /// event-count stride silently inherits whatever rate the game feels like
 /// publishing at. Pacing against the clock hits the requested rate exactly and
 /// keeps the promise that actually matters: one lock acquisition per frame.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn frame_is_due(next_due: &mut Instant, now: Instant, period: Duration) -> bool {
     if now < *next_due {
         return false;
