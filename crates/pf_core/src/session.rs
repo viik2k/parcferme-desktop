@@ -1,11 +1,13 @@
 //! Recording a live [`crate::lmu`] frame stream to disk.
 //!
-//! One session is one JSON-Lines file under
-//! `%LOCALAPPDATA%\cc.parcferme.desktop\sessions` — the same frame the relay
-//! would put on the wire, one object per line, in arrival order. Plain text
-//! because every consumer we have (the CLI's `jq`, a future upload to
-//! parcferme.cc, a replay) already speaks it, and because a half-written file
-//! from a crash mid-session still replays up to the last complete line.
+//! One session is one JSON-Lines file under the app's cache dir —
+//! `%LOCALAPPDATA%\cc.parcferme.desktop\sessions` on Windows,
+//! `$XDG_CACHE_HOME/cc.parcferme.desktop/sessions` (default
+//! `~/.cache/...`) elsewhere — the same frame the relay would put on the
+//! wire, one object per line, in arrival order. Plain text because every
+//! consumer we have (the CLI's `jq`, a future upload to parcferme.cc, a
+//! replay) already speaks it, and because a half-written file from a crash
+//! mid-session still replays up to the last complete line.
 //!
 //! A line is flushed per frame: at 10 Hz that is cheap, and the alternative is
 //! losing the last few seconds of every session that ends with the game
@@ -25,16 +27,40 @@ use crate::auth;
 use crate::lmu::Frame;
 use crate::{Error, Result, APP_ID};
 
-/// Where sessions are kept: `%LOCALAPPDATA%\cc.parcferme.desktop\sessions`.
+/// Where sessions are kept: `%LOCALAPPDATA%\cc.parcferme.desktop\sessions` on
+/// Windows, `$XDG_CACHE_HOME/cc.parcferme.desktop/sessions` — default
+/// `~/.cache/cc.parcferme.desktop/sessions` — elsewhere.
 ///
 /// Local, not roaming, app data — a long stint is tens of megabytes and has no
 /// business syncing to a domain profile (settings.json, which is tiny, lives in
-/// `%APPDATA%`).
+/// `%APPDATA%` / `~/.config`). The XDG cache root is the portable equivalent:
+/// same "machine-local, disposable" contract, same no-calendar-dependency
+/// simplicity (issue #35).
 pub fn dir() -> Result<PathBuf> {
+    #[cfg(windows)]
     let root = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .ok_or_else(|| Error::Io(std::io::Error::other("LOCALAPPDATA is not set")))?;
+
+    #[cfg(not(windows))]
+    let root = cache_dir()
+        .ok_or_else(|| Error::Io(std::io::Error::other("XDG_CACHE_HOME and HOME are not set")))?;
+
     Ok(root.join(APP_ID).join("sessions"))
+}
+
+/// The XDG cache root: `$XDG_CACHE_HOME` when set to a non-empty value,
+/// else `$HOME/.cache` (the spec's default). `~/.cache` rather than
+/// `~/.local/share` because recordings are disposable caches, not config or
+/// state a migration would want to carry.
+#[cfg(not(windows))]
+fn cache_dir() -> Option<PathBuf> {
+    match std::env::var_os("XDG_CACHE_HOME") {
+        // The XDG spec treats an empty value as unset; taking it literally
+        // would resolve sessions to `/cc.parcferme.desktop/...`.
+        Some(v) if !v.is_empty() => Some(PathBuf::from(v)),
+        _ => std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")),
+    }
 }
 
 /// Seconds since the Unix epoch. The file name carries this rather than a
@@ -342,6 +368,25 @@ pub fn gzip(path: &Path) -> Result<Vec<u8>> {
     Ok(encoder.finish()?)
 }
 
+/// Whether `file` is a bare file name — one path component by *both* the
+/// Unix and the Windows rule, so the verdict is identical on every platform
+/// `pf_core` builds for (issue #35).
+///
+/// A name is bare when it is non-empty, contains no `/` and no `\`, and is
+/// neither `.` nor `..`. The old check —
+/// `Path::new(file).file_name() != file` — let `a\b.jsonl` through on
+/// Linux, where `\` is an ordinary filename character, so a Windows-shaped
+/// traversal attempt survived validation and only tripped later when the
+/// sessions dir failed to resolve. Rejecting both platforms' separators up
+/// front also keeps a *Windows* share from ever following a `\`-bearing
+/// name that a Linux-built client would have let through — same contract
+/// everywhere. Reserved Windows device names (`CON`, `NUL`, …) are left
+/// alone: they can't traverse, and the OS rejects them at file-creation
+/// time with a clear error.
+fn is_bare_file_name(file: &str) -> bool {
+    !file.is_empty() && !file.contains('/') && !file.contains('\\') && file != "." && file != ".."
+}
+
 /// Share one recorded session on parcferme.cc (SERVER_CONTRACT §10).
 ///
 /// `file` is a bare file name inside [`dir`], never a path: the UI passes back
@@ -351,7 +396,7 @@ pub fn gzip(path: &Path) -> Result<Vec<u8>> {
 /// Blocking and slow by nature — the scan reads the whole file and the PUT
 /// sends every compressed byte — so callers run it off the UI thread.
 pub fn share(file: &str, private: bool) -> Result<UploadResult> {
-    if file.is_empty() || Path::new(file).file_name().is_none_or(|f| f != file) {
+    if !is_bare_file_name(file) {
         return Err(Error::Api(format!("{file:?} is not a session file name")));
     }
     let path = dir()?.join(file);
