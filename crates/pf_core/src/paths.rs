@@ -318,9 +318,9 @@ fn looks_like_steam_root(root: &Path) -> bool {
 }
 
 /// Le Mans Ultimate's Steam app id — the `compatdata` directory its Proton
-/// prefix lives under on a Linux install (store page 1636160).
+/// prefix lives under on a Linux install (store page 2399420).
 #[cfg(not(windows))]
-const LMU_APP_ID: &str = "1636160";
+const LMU_APP_ID: &str = "2399420";
 
 /// Read a single registry string value.
 ///
@@ -583,8 +583,8 @@ mod tests {
     #[test]
     fn proton_prefix_resolves_lmu_regardless_of_segment_casing() {
         for layout in [
-            "steamapps/compatdata/1636160/pfx/drive_c/program files (x86)/steamapps/common/le mans ultimate",
-            "steamapps/compatdata/1636160/pfx/drive_c/Program Files (x86)/Steam/steamapps/common/Le Mans Ultimate",
+            "steamapps/compatdata/2399420/pfx/drive_c/program files (x86)/steamapps/common/le mans ultimate",
+            "steamapps/compatdata/2399420/pfx/drive_c/Program Files (x86)/Steam/steamapps/common/Le Mans Ultimate",
         ] {
             let root = steam_fixture("proton");
             let settings = mkdirs(&root, &format!("{layout}/UserData/player/Settings"));
@@ -610,7 +610,7 @@ mod tests {
         let root = steam_fixture("shadow");
         mkdirs(
             &root,
-            "steamapps/compatdata/1636160/pfx/drive_c/program files (x86)",
+            "steamapps/compatdata/2399420/pfx/drive_c/program files (x86)",
         );
         let other = mkdirs(&root, "mnt/big");
         std::fs::write(
