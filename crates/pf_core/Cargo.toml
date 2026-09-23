@@ -17,5 +17,8 @@ log = { workspace = true }
 ureq = { version = "2", features = ["json"] }
 # gzip for telemetry uploads (SERVER_CONTRACT §10) — a session is ~10:1.
 flate2 = "1"
-# OS keychain. v1 is Windows-only → Windows Credential Manager backend.
-keyring = { version = "3", features = ["windows-native"] }
+# OS keychain: Windows Credential Manager, or the Secret Service (GNOME
+# Keyring / KWallet) on Linux. Each backend is target-gated inside keyring, so
+# both features are safe everywhere. Without a Linux backend keyring silently
+# falls back to an in-memory mock and sign-in never persists.
+keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust"] }
