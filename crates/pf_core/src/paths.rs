@@ -61,7 +61,8 @@ pub fn default_setups_dir(sim: Sim) -> Result<PathBuf> {
 pub struct SimFolderStatus {
     pub sim: Sim,
     /// The directory we'd use (override if given, else the detected default).
-    /// `None` only if the platform has no Documents dir (not Windows).
+    /// `None` when detection comes up empty — no Documents dir, or no LMU
+    /// install in any Steam library.
     pub dir: Option<PathBuf>,
     /// Whether `dir` exists on disk.
     pub found: bool,
@@ -115,28 +116,132 @@ fn safe_component(name: &str) -> Option<String> {
 
 /// Locate the Le Mans Ultimate install by walking every Steam library on this
 /// machine. Returns the game directory (the one holding `UserData`).
-#[cfg(windows)]
 fn lmu_install_dir() -> Option<PathBuf> {
-    steam_libraries()
-        .into_iter()
-        .map(|lib| lib.join("steamapps").join("common").join(LMU_FOLDER))
+    lmu_install_dir_in(&steam_libraries())
+}
+
+/// [`lmu_install_dir`] against an explicit library list — the seam the
+/// fixture tests drive, because a dev box has no Steam install to detect
+/// against for real. Production has nothing to inject but the live list.
+fn lmu_install_dir_in(libraries: &[PathBuf]) -> Option<PathBuf> {
+    libraries
+        .iter()
+        .flat_map(|lib| lmu_candidates(lib))
         .find(|dir| dir.is_dir())
 }
 
-#[cfg(not(windows))]
-fn lmu_install_dir() -> Option<PathBuf> {
-    None
+/// The candidate game-install dirs inside one Steam library, in probe order:
+/// the Proton prefix views first (non-Windows), then the library's own
+/// `steamapps/common`.
+///
+/// Steam stores a game's files under `<library>/steamapps/common/…` on every
+/// OS — Proton included: the prefix's `drive_c/…/Steam/steamapps` is a link
+/// back into the real `steamapps` tree, so on Linux the candidates usually
+/// resolve to the same directory and first-hit wins either way. Where they
+/// can disagree, no bet is made — every candidate is `is_dir`-probed and
+/// the first one actually on disk wins (issue #35: detection was written
+/// against fixture trees, not a live Linux Steam). The prefix views go
+/// first because a prefix can only exist if the game actually ran through
+/// Proton — the only way LMU, a Windows-only title, runs on Linux at all;
+/// the library's own `common` dir is the fallback, and the whole story if a
+/// native build ever appears.
+fn lmu_candidates(lib: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::with_capacity(3);
+    #[cfg(not(windows))]
+    candidates.extend(lmu_proton_dirs(lib));
+    candidates.extend(lmu_native_dir(lib));
+    candidates
 }
 
-/// Every Steam library root: the client's own directory plus each `path` listed
-/// in `libraryfolders.vdf` — games routinely live on a different drive from
-/// Steam itself.
+/// The game dir under the library's own `steamapps/common`. On Windows the
+/// file API itself is case-insensitive, so the canonical name joins
+/// directly; elsewhere the name is probed by case-insensitive scan like the
+/// prefix segments are — a Proton-written directory's casing is not
+/// something to bet an exact match on.
 #[cfg(windows)]
+fn lmu_native_dir(lib: &Path) -> Option<PathBuf> {
+    Some(lib.join("steamapps").join("common").join(LMU_FOLDER))
+}
+
+/// [`lmu_native_dir`], probed rather than joined: case-sensitive filesystem.
+#[cfg(not(windows))]
+fn lmu_native_dir(lib: &Path) -> Option<PathBuf> {
+    find_dir_ci(&lib.join("steamapps").join("common"), LMU_FOLDER)
+}
+
+/// Resolve the game's directory inside a library's Proton prefix:
+/// `steamapps/compatdata/<LMU app id>/pfx/drive_c/…/steamapps/common/<LMU>`.
+///
+/// Two spellings of the `drive_c` side are seen in the wild — the classic
+/// layout keeps the client's `Steam` symlink in the chain
+/// (`…/Program Files (x86)/Steam/steamapps/…`), some Proton versions write
+/// the same chain without it (`…/Program Files (x86)/steamapps/…`) — and
+/// without a live Linux Steam install to check against, both are probed and
+/// whichever exists on disk wins.
+///
+/// Every segment is matched by case-insensitive scan ([`find_dir_ci`]): the
+/// prefix mimics a Windows `C:` drive but is written by Linux Steam, whose
+/// segment casing has drifted between Proton versions (`Program Files (x86)`
+/// vs `program files (x86)`), while the Windows file API the game itself
+/// sees is case-insensitive anyway.
+#[cfg(not(windows))]
+fn lmu_proton_dirs(lib: &Path) -> Vec<PathBuf> {
+    let drive_c = lib
+        .join("steamapps")
+        .join("compatdata")
+        .join(LMU_APP_ID)
+        .join("pfx")
+        .join("drive_c");
+    ["program files (x86)", "program files"]
+        .into_iter()
+        .filter_map(|files| find_dir_ci(&drive_c, files))
+        .flat_map(|files| {
+            [
+                find_dir_ci(&files, "steamapps"),
+                find_dir_ci(&files, "Steam").map(|steam| steam.join("steamapps")),
+            ]
+        })
+        .flatten()
+        .filter_map(|apps| {
+            find_dir_ci(&apps, "common").and_then(|common| find_dir_ci(&common, LMU_FOLDER))
+        })
+        .collect()
+}
+
+/// The first direct child of `dir` whose name matches `name` ignoring ASCII
+/// case, provided it is a directory. Symlinks are followed (`is_dir`
+/// resolves them) and a dangling one fails the check — an uninstall must not
+/// leave detection pointing at a ghost.
+#[cfg(not(windows))]
+fn find_dir_ci(dir: &Path, name: &str) -> Option<PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(name)
+        })
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+}
+
+/// Every Steam library root: the client's own directory plus each `path`
+/// listed in `libraryfolders.vdf` — games routinely live on a different
+/// drive from Steam itself, and the VDF's format is identical on every OS
+/// Steam runs on.
 fn steam_libraries() -> Vec<PathBuf> {
     let Some(steam) = steam_root() else {
         return Vec::new();
     };
-    let mut libs = vec![steam.clone()];
+    steam_libraries_in(&steam)
+}
+
+/// [`steam_libraries`] against an explicit Steam root — the fixture-test
+/// seam, mirroring [`lmu_install_dir_in`].
+fn steam_libraries_in(steam: &Path) -> Vec<PathBuf> {
+    let mut libs = vec![steam.to_path_buf()];
     if let Ok(vdf) = std::fs::read_to_string(steam.join("steamapps").join("libraryfolders.vdf")) {
         libs.extend(parse_library_paths(&vdf));
     }
@@ -148,13 +253,13 @@ fn steam_libraries() -> Vec<PathBuf> {
 /// ponytail: the file is a tiny key/value tree and we want exactly one key out
 /// of it — a real VDF parser would be a dependency for two lines of work. If we
 /// ever need more of the file (app ids, sizes), swap in `keyvalues-parser`.
-#[cfg(windows)]
 fn parse_library_paths(vdf: &str) -> Vec<PathBuf> {
     vdf.lines()
         .filter_map(|line| line.trim().strip_prefix("\"path\""))
         .filter_map(|rest| {
             let quoted = rest.trim().strip_prefix('"')?.strip_suffix('"')?;
             // VDF escapes backslashes; `C:\\Games\\Steam` is really `C:\Games\Steam`.
+            // (On a Unix Steam the values hold forward slashes and this is a no-op.)
             Some(PathBuf::from(quoted.replace("\\\\", "\\")))
         })
         .collect()
@@ -176,6 +281,46 @@ fn steam_root() -> Option<PathBuf> {
                 .find(|p| p.is_dir())
         })
 }
+
+/// Where the Steam client is installed on a Unix host. The candidates, in
+/// order of authority:
+///
+/// 1. `~/.steam/steam` — the symlink the client maintains, which survives
+///    the user relocating the real install (`~/.steam` is a symlink farm),
+/// 2. `~/.local/share/Steam` — the default install location,
+/// 3. `~/.steam/root` — an older alias some distro packages still create.
+///
+/// Each candidate must look like a real Steam root before it counts: a
+/// `~/.steam` entry left behind by an uninstall would otherwise send the
+/// whole library walk into a dead directory.
+#[cfg(not(windows))]
+fn steam_root() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    steam_root_in(&home)
+}
+
+/// [`steam_root`]'s probe order against an explicit home directory — the
+/// fixture-test seam, mirroring [`lmu_install_dir_in`].
+#[cfg(not(windows))]
+fn steam_root_in(home: &Path) -> Option<PathBuf> {
+    [".steam/steam", ".local/share/Steam", ".steam/root"]
+        .into_iter()
+        .map(|rel| home.join(rel))
+        .find(|candidate| looks_like_steam_root(candidate))
+}
+
+/// Whether a directory plausibly *is* a Steam root: the library index file
+/// or the shared game-files dir exists beneath its `steamapps`.
+#[cfg(not(windows))]
+fn looks_like_steam_root(root: &Path) -> bool {
+    root.join("steamapps").join("libraryfolders.vdf").is_file()
+        || root.join("steamapps").join("common").is_dir()
+}
+
+/// Le Mans Ultimate's Steam app id — the `compatdata` directory its Proton
+/// prefix lives under on a Linux install (store page 2399420).
+#[cfg(not(windows))]
+const LMU_APP_ID: &str = "2399420";
 
 /// Read a single registry string value.
 ///
@@ -310,7 +455,6 @@ mod tests {
         assert_eq!(id.car, None, "LMU has no car folder");
     }
 
-    #[cfg(windows)]
     #[test]
     fn library_paths_are_scraped_and_unescaped() {
         let vdf = r#"
@@ -335,6 +479,174 @@ mod tests {
         );
         // Nothing usable in the file must not panic or invent a library.
         assert!(parse_library_paths("junk").is_empty());
+    }
+
+    /// The fixture half of a Steam install, shared by the detection tests:
+    /// a root holding `steamapps/libraryfolders.vdf` (so it counts as a real
+    /// Steam root), pointing at one extra library, with LMU installed in
+    /// whatever layout a test asks for. Built under a fresh temp dir each
+    /// call, because this box has no Steam install to detect against for
+    /// real — every assertion below runs against a tree this test created.
+    #[cfg(not(windows))]
+    fn steam_fixture(name: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("pf-paths-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("steamapps/common")).expect("create steam root");
+        std::fs::write(
+            root.join("steamapps/libraryfolders.vdf"),
+            "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"/nowhere\"\n\t}\n}\n",
+        )
+        .expect("write vdf");
+        root
+    }
+
+    /// `mkdir -p` for fixture trees: every argument is created under `root`.
+    #[cfg(not(windows))]
+    fn mkdirs(root: &Path, rel: &str) -> PathBuf {
+        let dir = root.join(rel);
+        std::fs::create_dir_all(&dir).expect("create fixture dir");
+        dir
+    }
+
+    /// A Steam root is accepted in all three spellings the client/distros
+    /// produce, and rejected when nothing Steam-like lives in it.
+    #[cfg(not(windows))]
+    #[test]
+    fn steam_root_probe_order_matches_the_real_layouts() {
+        let home = std::env::temp_dir().join(format!("pf-paths-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+
+        // No Steam at all → no root, even with the symlink farm present.
+        mkdirs(&home, ".steam");
+        assert_eq!(steam_root_in(&home), None);
+
+        // The default install location counts on its own, once it holds the
+        // library index.
+        let real = mkdirs(&home, ".local/share/Steam/steamapps/common");
+        std::fs::write(real.join("libraryfolders.vdf"), "").unwrap();
+        assert_eq!(steam_root_in(&home), Some(home.join(".local/share/Steam")));
+
+        // The client's own symlink outranks the default, wherever it points
+        // (the `~/.steam` symlink farm survives a relocated install). The
+        // candidate is returned as the symlink path itself — `is_dir`
+        // resolves through it, and production keeps using `~/.steam/steam`.
+        let moved = mkdirs(&home, "elsewhere/Steam/steamapps/common");
+        std::fs::write(moved.parent().unwrap().join("libraryfolders.vdf"), "").unwrap();
+        std::os::unix::fs::symlink(
+            moved.parent().unwrap().parent().unwrap(),
+            home.join(".steam/steam"),
+        )
+        .unwrap();
+        assert_eq!(steam_root_in(&home), Some(home.join(".steam/steam")));
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// `libraryfolders.vdf` is read the same way on every OS, so a second
+    /// library on another "drive" is walked and the game found there.
+    #[cfg(not(windows))]
+    #[test]
+    fn libraries_are_enumerated_from_the_vdf_like_on_windows() {
+        let root = steam_fixture("libs");
+        let other = mkdirs(&root, "mnt/games");
+        std::fs::write(
+            root.join("steamapps/libraryfolders.vdf"),
+            format!(
+                "\"libraryfolders\"\n{{\n\t\"1\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n}}\n",
+                other.display()
+            ),
+        )
+        .unwrap();
+
+        let libs = steam_libraries_in(&root);
+        assert_eq!(libs, vec![root.clone(), other.clone()]);
+
+        // And the LMU walk finds an install sitting in that second library.
+        let game = mkdirs(
+            &other,
+            "steamapps/common/Le Mans Ultimate/UserData/player/Settings",
+        );
+        let install = lmu_install_dir_in(&libs).expect("install found in second library");
+        assert_eq!(install, other.join("steamapps/common/Le Mans Ultimate"));
+        assert_eq!(Sim::Lmu.setups_root(&install), game);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The Proton prefix view: a compatdata prefix for LMU's app id is
+    /// resolved through case-varying `drive_c` segments to the game dir,
+    /// exactly the chain a Linux Steam writes for a Windows-only title. The
+    /// two `drive_c` spellings seen in the wild are probed as separate
+    /// fixtures — a shared `drive_c` would make the winner depend on
+    /// `read_dir` order.
+    #[cfg(not(windows))]
+    #[test]
+    fn proton_prefix_resolves_lmu_regardless_of_segment_casing() {
+        for layout in [
+            "steamapps/compatdata/2399420/pfx/drive_c/program files (x86)/steamapps/common/le mans ultimate",
+            "steamapps/compatdata/2399420/pfx/drive_c/Program Files (x86)/Steam/steamapps/common/Le Mans Ultimate",
+        ] {
+            let root = steam_fixture("proton");
+            let settings = mkdirs(&root, &format!("{layout}/UserData/player/Settings"));
+            let libs = steam_libraries_in(&root);
+            let install =
+                lmu_install_dir_in(&libs).unwrap_or_else(|| panic!("layout {layout:?} resolves"));
+            assert_eq!(
+                install,
+                root.join(layout),
+                "prefix layout {layout:?} must resolve"
+            );
+            assert_eq!(Sim::Lmu.setups_root(&install), settings);
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    /// The prefix candidate only counts when the game dir really is in it:
+    /// an empty compatdata for the right app id (game uninstalled, prefix
+    /// left behind) must not shadow a healthy install elsewhere.
+    #[cfg(not(windows))]
+    #[test]
+    fn an_empty_prefix_does_not_shadow_a_real_install() {
+        let root = steam_fixture("shadow");
+        mkdirs(
+            &root,
+            "steamapps/compatdata/2399420/pfx/drive_c/program files (x86)",
+        );
+        let other = mkdirs(&root, "mnt/big");
+        std::fs::write(
+            root.join("steamapps/libraryfolders.vdf"),
+            format!(
+                "\"libraryfolders\"\n{{\n\t\"1\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n}}\n",
+                other.display()
+            ),
+        )
+        .unwrap();
+        let game = mkdirs(&other, "steamapps/common/Le Mans Ultimate");
+
+        let libs = steam_libraries_in(&root);
+        assert_eq!(lmu_install_dir_in(&libs), Some(game));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The library's own `common` dir is the fallback a native install (or a
+    /// Proton one whose prefix view is missing) is found through — found
+    /// case-insensitively, since the walk also runs on case-sensitive
+    /// filesystems where the exact folder name is Steam's choice, not ours.
+    #[cfg(not(windows))]
+    #[test]
+    fn native_common_dir_is_found_case_insensitively() {
+        let root = steam_fixture("native");
+        let settings = mkdirs(
+            &root,
+            "steamapps/common/le mans ultimate/UserData/player/Settings",
+        );
+        let libs = steam_libraries_in(&root);
+        let install = lmu_install_dir_in(&libs).expect("native install found");
+        assert_eq!(install, root.join("steamapps/common/le mans ultimate"));
+        assert_eq!(Sim::Lmu.setups_root(&install), settings);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
