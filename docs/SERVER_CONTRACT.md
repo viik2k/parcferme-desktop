@@ -108,7 +108,7 @@ for the non-browser caller.
 {
   "url": "<presigned R2 GET>",   // required
   "filename": "quali_spa.json",  // required; the setup file name as saved in-sim
-  "sim": "acc",                  // "iracing" | "acc" | "lmu"; omit ⇒ iracing
+  "sim": "acc",                  // "iracing" | "acc" | "lmu" | "ams2"; omit ⇒ iracing
   "car": "ferrari_488_gt3_evo",  // the sim's INTERNAL folder id (see caveat)
   "track": "spa",                // ACC only; required for the setup to list in-game
   "name": "Quali — Spa"          // display name, for the toast (optional)
@@ -151,6 +151,12 @@ The client (`pf_core`) routes the file by the resolved sim:
 > per-sim folder column) to the real folder id before returning it. Until then
 > files land in a human-named folder and may not appear in-sim. (Carried over
 > from the M2 iRacing caveat; now applies per sim.)
+>
+> **AMS2 (added parc-ferme#140):** the server returns `car` as the display name
+> and `track: null` until AMS2's on-disk setups layout has been read off a live
+> install. The folder maps live in one row of the server's `SIM_FORMATS` table,
+> so filling them in needs no route change. The client has no AMS2 destination
+> yet either.
 >
 > **LMU is the exception** (verified against a live install 2026-07-25): it
 > keeps rFactor 2's layout, filing setups by **track only** — there is no car
@@ -202,14 +208,17 @@ a setup owned by the device token's linked user.
 
 | param      | required | meaning                                                      |
 | :--------- | :------- | :----------------------------------------------------------- |
-| `filename` | yes      | file name as on disk, e.g. `quali_spa.json`                  |
-| `sim`      | yes      | `"iracing"` \| `"acc"` \| `"lmu"`                             |
-| `car`      | yes      | the sim's **internal car folder id** as found on disk         |
-| `track`    | ACC, LMU | internal track folder id (see the per-sim layouts in §5)      |
-| `name`     | no       | display name typed by the user                               |
-| `types`    | no       | comma-separated setup types from §7a's `setupTypes`          |
-| `notes`    | no       | free text description, max 5000 chars                        |
-| `private`  | no       | `"true"` makes the setup owner-only; anything else is public |
+| `filename`  | yes      | file name as on disk, e.g. `quali_spa.json`                  |
+| `sim`       | yes      | `"iracing"` \| `"acc"` \| `"lmu"` \| `"ams2"`                  |
+| `car`       | new setup| the sim's **internal car folder id** as found on disk         |
+| `track`     | ACC, LMU | internal track folder id (see the per-sim layouts in §5)      |
+| `name`      | no       | display name typed by the user                               |
+| `types`     | no       | comma-separated setup types from §7a's `setupTypes`          |
+| `notes`     | no       | free text description, max 5000 chars                        |
+| `private`   | no       | `"true"` makes the setup owner-only; anything else is public |
+| `setup`     | no       | setup uuid: push the file as a **new version** of it (§7c)   |
+| `changelog` | no       | version note for a `setup=` push, max 1000 chars             |
+| `session`   | no       | `startedUnix` of the recording the file was saved during (§7c) |
 
 `types` is a **multi-select** (parc-ferme#77): `setups.tags` is an array, so
 `types=aggressive,qualifying` is one setup carrying both. Omitting it entirely
@@ -287,14 +296,84 @@ Response `200/201`:
 ```jsonc
 {
   "id": "<setup uuid>",                          // required
-  "url": "https://parcferme.cc/setups/<uuid>"    // optional; client synthesizes it from `id` if absent
+  "url": "https://parcferme.cc/setups/<uuid>",   // optional; client synthesizes it from `id` if absent
+  "version": 1,                                  // version the file is (or already was) on the site
+  "duplicate": true,                             // only when an existing setup was returned, see §7c
+  "unchanged": true                              // only on a `setup=` push identical to the active version
 }
 ```
 
-Errors: `401` bad/revoked token · `403` uploads not permitted for this user ·
-`413` too large · `422` invalid metadata. The client maps 401 to its reconnect
-hint and surfaces the rest verbatim, so a JSON `{ "error": "…" }` body with a
+`201` when a setup was created, `200` otherwise (a version push, or a
+duplicate/unchanged answer). Every field after `url` is additive; a client that
+reads only `id`/`url` keeps working.
+
+Errors: `401` bad/revoked token · `403` uploads not permitted for this user, or
+`setup=` names someone else's setup · `404` `setup=` names no setup · `413` too
+large · `422` invalid metadata, or the bytes are plainly another sim's setup
+file (sniffed by shape, e.g. an ACC `.json` sent as `sim=lmu`, or a garage
+export sent as the `.sto`). The client maps 401 to its reconnect hint and
+surfaces the rest verbatim, so a JSON `{ "error": "…" }` body with a
 human-readable message is worth returning.
+
+## 7c. Auto-sync: version pushes, idempotency, session link (parc-ferme#131)
+
+**Status: server shipped, client not yet.** Everything here rides on §7's one
+route; nothing changes for a client that never sends the new params.
+
+### Push a new version: `setup=<uuid>`
+
+The file becomes the next version of that setup instead of a new setup, which
+is what an in-garage re-save should be. The caller must own the setup (`403`
+otherwise), and `sim` must match it (`422`). `car`, `track`, `name`, `types`,
+`notes` and `private` are ignored: a version inherits its setup's car, track and
+visibility. `changelog` is the version note. The client learns the uuid from
+the `id` of the first upload, so the watcher's baseline should map each local
+file to the setup uuid it created.
+
+### Re-sending a file is safe
+
+Every version stores a sha256 of its bytes (`setup_versions.contentHash`).
+
+- **New setup** (no `setup=`): when the user already has a version with these
+  exact bytes for the same sim, car and track, the server creates nothing and
+  answers `200` with that setup's `id` and `duplicate: true`. Any version
+  matches, not only the active one, so a client that lost its baseline and
+  re-sees old files gets back the setups it already made.
+- **Version push**: bytes identical to the setup's **active** version are a
+  no-op, `200` with `unchanged: true`. A file reverted to an older version's
+  bytes is a real change and becomes a new version.
+
+So the desktop debounce is not load-bearing for correctness. It still is for
+cost: every re-send is a request against the upload rate limit.
+
+The server does **not** guard the other echo: a setup someone else owns,
+installed by §5 into the setups folder, re-detected and pushed back as the
+user's own. Same bytes as someone else's setup is legitimate on its own (every
+iRacing driver has the same baseline files), so the watcher's seen-set has to
+exclude files §5 wrote.
+
+### Link a setup to the stint: `session=<startedUnix>`
+
+Send the `startedUnix` of the recording that was running when the file was
+saved, the same value §10's create body carries (it is also the `<unix>` in
+`session-<unix>.jsonl`). It must be epoch seconds inside §10's window, else
+`422`. Omit it when nothing was recording.
+
+The server stores it on the version and links it to the telemetry session with
+the same owner, sim and `startedAt`, **at read time**. So order does not
+matter: a setup saved mid-stint is normally pushed long before the recording is
+finished and shared, and it links the moment the session lands. The setup page
+and its version history link to the session; the session page lists the setups
+saved during it. A private or unshared session stays invisible to everyone but
+its owner.
+
+### Recommended client defaults
+
+- Push auto-synced setups with `private=true`. The site has no draft state, and
+  a half-tuned garage experiment should not go public on its own; the owner
+  flips it on the site. (Same reasoning as §10's private sessions.)
+- First run: baseline, upload nothing retroactively. The server has no
+  backfill cap beyond the §7 rate limit (20 requests a minute per user).
 
 ## 7a. Picker suggestions — car/track names and setup types
 
@@ -302,7 +381,7 @@ The upload form offers the site's own spelling as autocomplete suggestions, so
 users pick instead of guess (the alias table above only covers known folder-id
 exceptions). One authenticated call feeds every picker:
 
-### `GET /api/device/options?sim=<iracing|acc|lmu>`
+### `GET /api/device/options?sim=<iracing|acc|lmu|ams2>`
 
 - `Authorization: Bearer <device token>` — same resolver as §3.
 - `sim` is required; anything else → `400 {"error":"sim must be one of: …"}`.
@@ -459,7 +538,7 @@ Response `200`:
     {
       "id": "3f2a…",                 // setup uuid — feeds §5 download verbatim
       "name": "Quali — Spa",
-      "sim": "acc",                  // "iracing" | "acc" | "lmu"
+      "sim": "acc",                  // "iracing" | "acc" | "lmu" | "ams2"
       "car": "Ferrari 296 GT3",      // DISPLAY names here, not folder ids
       "track": "Spa-Francorchamps",  // null if the setup has no track
       "updatedAt": "2026-08-01T10:22:00.000Z",
@@ -512,10 +591,10 @@ Three calls: create → PUT → complete.
 
 ```jsonc
 {
-  "sim": "lmu",                    // required; "iracing" | "acc" | "lmu"
+  "sim": "lmu",                    // required; "iracing" | "acc" | "lmu" | "ams2"
   "car": "Ferrari 499P",           // required; free text, resolved like §7's `car`
   "track": "Le Mans 24h",          // required; free text, resolved like §7's `track`
-  "startedUnix": 1757269211,       // required; seconds since the epoch, when recording began
+  "startedUnix": 1757269211,       // required; seconds since the epoch, when recording began. Also §7c's `session`
   "durationS": 2714.4,             // required; wall-clock length of the recording
   "frames": 27144,                 // required; lines in the file
   "hz": 10.0,                      // required; the rate the source was configured at
