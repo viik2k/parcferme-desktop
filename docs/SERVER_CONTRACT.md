@@ -122,7 +122,7 @@ iRacing, so the client no longer trusts the tag blindly. Resolution order
 (`DownloadInfo::resolved_sim`):
 
 1. **File extension is ground truth** — `.sto` → iracing, `.json` → acc,
-   `.svm` → lmu. Each format loads in exactly one supported sim, so a
+   `.svm` → lmu, `.vts` → ams2 (once the client supports it). Each format loads in exactly one supported sim, so a
    recognized extension **wins over a contradicting `sim` tag** (logged as a
    warning).
 2. The `sim` tag decides only when the extension is unrecognized. Parsing is
@@ -142,6 +142,7 @@ The client (`pf_core`) routes the file by the resolved sim:
 | `iracing` | `Documents\iRacing\setups`                                      | `<car>\`         |
 | `acc`     | `Documents\Assetto Corsa Competizione\Setups`                   | `<car>\<track>\` |
 | `lmu`     | `<steam>\steamapps\common\Le Mans Ultimate\UserData\player\Settings` | `<track>\`  |
+| `ams2`    | `Documents\Automobilista 2\savegame\<steam id>\automobilista 2\vehiclesetups_1_6` | flat; the file name is the slot |
 
 > **`car`/`track` must be the sim's internal folder ids, not display names.**
 > Each sim lists a setup only when it sits in the exact folder it expects:
@@ -152,11 +153,21 @@ The client (`pf_core`) routes the file by the resolved sim:
 > files land in a human-named folder and may not appear in-sim. (Carried over
 > from the M2 iRacing caveat; now applies per sim.)
 >
-> **AMS2 (added parc-ferme#140):** the server returns `car` as the display name
-> and `track: null` until AMS2's on-disk setups layout has been read off a live
-> install. The folder maps live in one row of the server's `SIM_FORMATS` table,
-> so filling them in needs no route change. The client has no AMS2 destination
-> yet either.
+> **AMS2 (read off a live install 2026-09-25, parc-ferme#140):** setups are
+> binary `.vts` files (fixed 2592 bytes, apparently encrypted), stored **flat**
+> in `Documents\Automobilista 2\savegame\<steam id>\automobilista 2\vehiclesetups_1_6\`.
+> There is no car or track folder: the **file name is the slot**. It is
+> `ts<16 chars>.vts`, packing a track id and a car id, so the client must
+> write the file under exactly the `filename` §5 returns and never rename it.
+> The server keeps the uploaded name intact for that reason. `car` comes back
+> as the display name and `track` as `null`, since there is no folder to place
+> by. `<steam id>` differs per machine, so the client has to find the one
+> numeric folder under `savegame` (or take a Settings override), and should
+> treat the `_1_6` suffix as a format version that may change. Setup shops
+> ship `.vts` files, so they do install on another user's machine. Open: whether
+> a name is one slot per car and track, in which case installing replaces the
+> user's own setup for that pair and needs §5's conflict policy. The client has
+> no AMS2 destination yet.
 >
 > **LMU is the exception** (verified against a live install 2026-07-25): it
 > keeps rFactor 2's layout, filing setups by **track only** — there is no car
