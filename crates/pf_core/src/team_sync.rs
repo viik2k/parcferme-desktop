@@ -94,7 +94,7 @@ fn run() {
     loop {
         let mut settings = Settings::load_default();
         if settings.team_auto_install_enabled {
-            match sweep(&mut settings) {
+            match sweep(&mut settings, download::list_setups("team")) {
                 Ok(()) => last_err.clear(),
                 Err(e) => {
                     let msg = e.to_string();
@@ -109,9 +109,10 @@ fn run() {
     }
 }
 
-/// One poll cycle: list the team vault, seed on first run, install the rest.
-fn sweep(settings: &mut Settings) -> Result<()> {
-    let items = download::list_setups("team")?;
+/// One poll cycle over the team vault's `listing`: seed on first run, install
+/// the rest. The listing is passed in so tests don't reach the keychain.
+fn sweep(settings: &mut Settings, listing: Result<Vec<crate::api::SetupSummary>>) -> Result<()> {
+    let items = listing?;
 
     if !settings.team_auto_install_seeded {
         settings.team_seen_setups = items.iter().map(|s| s.id.clone()).collect();
@@ -181,14 +182,15 @@ fn push_recent(entry: Installed) {
 mod tests {
     use super::*;
 
-    /// No token is ever stored under this crate's keychain service in a CI
-    /// runner, so `list_setups` fails at the auth check before any network
-    /// call. Confirms the failure propagates cleanly and leaves the seen-set
-    /// untouched rather than wrongly marking the sweep as seeded.
+    /// A signed-out listing propagates cleanly and leaves the seen-set
+    /// untouched rather than wrongly marking the sweep as seeded. The failure
+    /// is injected: reading the real keychain made this pass only on machines
+    /// never signed in, and on a signed-in one the seed path would overwrite
+    /// the real settings.json.
     #[test]
     fn sweep_propagates_auth_failure_without_touching_state() {
         let mut settings = Settings::default();
-        let err = sweep(&mut settings).unwrap_err();
+        let err = sweep(&mut settings, Err(Error::NotLinked)).unwrap_err();
         assert!(matches!(err, Error::NotLinked));
         assert!(!settings.team_auto_install_seeded);
         assert!(settings.team_seen_setups.is_empty());
