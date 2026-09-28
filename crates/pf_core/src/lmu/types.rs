@@ -9,7 +9,20 @@
 
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+
+/// `null` reads as the default. `#[serde(default)]` only covers a *missing*
+/// key; LMU also sends `null` for an empty list, and before this one such
+/// field failed the whole RepairAndRefuel parse — every poll, a full race long
+/// (2,342 times in one 2026-09-26 log), so the pit menu, wear and weather never
+/// landed.
+fn nullable<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
 
 /// GET /rest/strategy/usage
 ///
@@ -52,6 +65,7 @@ pub struct UsageLap {
     /// VE system (GT3/LMP2/LMP3) — see `has_virtual_energy`.
     pub ve: Option<f64>,
     /// Tyre life remaining, percent, FL/FR/RL/RR (assumed order).
+    #[serde(deserialize_with = "nullable")]
     pub tyres: Vec<f64>,
 }
 
@@ -340,9 +354,12 @@ pub struct RepairAndRefuel {
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 pub struct Wearables {
+    #[serde(deserialize_with = "nullable")]
     pub brakes: Vec<f64>,
+    #[serde(deserialize_with = "nullable")]
     pub tires: Vec<f64>,
     /// Per-corner suspension damage, 0 = undamaged.
+    #[serde(deserialize_with = "nullable")]
     pub suspension: Vec<f64>,
 }
 
@@ -526,17 +543,25 @@ pub struct WeatherForecast {
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "PascalCase", default)]
 pub struct ForecastNodes {
+    #[serde(deserialize_with = "nullable")]
     pub start_time: Vec<f64>,
+    #[serde(deserialize_with = "nullable")]
     pub duration: Vec<f64>,
     /// Celsius already — unlike `CurrentWeather`, which is kelvin.
+    #[serde(deserialize_with = "nullable")]
     pub temperature: Vec<f64>,
     /// Percent.
+    #[serde(deserialize_with = "nullable")]
     pub humidity: Vec<f64>,
     /// Percent.
+    #[serde(deserialize_with = "nullable")]
     pub rain_chance: Vec<f64>,
     /// Sky index; the game's own cloud enum, meaning unconfirmed.
+    #[serde(deserialize_with = "nullable")]
     pub sky: Vec<f64>,
+    #[serde(deserialize_with = "nullable")]
     pub wind_speed: Vec<f64>,
+    #[serde(deserialize_with = "nullable")]
     pub wind_direction: Vec<f64>,
 }
 
@@ -544,6 +569,7 @@ pub struct ForecastNodes {
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PitMenuWrapper {
+    #[serde(deserialize_with = "nullable")]
     pub pit_menu: Vec<PitMenuItem>,
 }
 
@@ -556,6 +582,7 @@ pub struct PitMenuItem {
     /// Includes the trailing colon, as the game sends it: `"FUEL RATIO:"`.
     pub name: Option<String>,
     pub current_setting: Option<usize>,
+    #[serde(deserialize_with = "nullable")]
     pub settings: Vec<PitMenuSetting>,
 }
 
