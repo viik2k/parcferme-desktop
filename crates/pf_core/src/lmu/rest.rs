@@ -9,6 +9,7 @@
 //! Response shapes live in [`super::types`] and come from real captures, not
 //! from guesses — see `tests/lmu_deserialize.rs`.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::time::Duration;
 
@@ -107,6 +108,9 @@ pub struct Client {
     /// forever.
     buf: Vec<u8>,
     state: RestSnapshot,
+    /// The last parse error per endpoint, so a shape the game keeps sending is
+    /// logged once, not at 1 Hz for a whole race.
+    last_shape_err: HashMap<&'static str, String>,
 }
 
 impl Client {
@@ -124,6 +128,7 @@ impl Client {
             base: base.into(),
             buf: Vec::with_capacity(64 * 1024),
             state: RestSnapshot::default(),
+            last_shape_err: HashMap::new(),
         }
     }
 
@@ -151,14 +156,24 @@ impl Client {
         Ok(&self.buf)
     }
 
-    fn get_json<T: DeserializeOwned>(&mut self, endpoint: &str) -> Result<T> {
+    fn get_json<T: DeserializeOwned>(&mut self, endpoint: &'static str) -> Result<T> {
         let body = self.get_raw(endpoint)?;
-        serde_json::from_slice(body).map_err(|e| {
-            // The body is the only way to fix a fixture after LMU changes a
-            // shape, and it is game telemetry, not a secret.
-            log::debug!("{endpoint} unexpected shape: {e}");
-            Error::Api(format!("LMU {endpoint} returned an unexpected shape: {e}"))
-        })
+        match serde_json::from_slice(body) {
+            Ok(v) => {
+                self.last_shape_err.remove(endpoint);
+                Ok(v)
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if self.last_shape_err.get(endpoint) != Some(&msg) {
+                    log::debug!("{endpoint} unexpected shape: {msg}");
+                    self.last_shape_err.insert(endpoint, msg.clone());
+                }
+                Err(Error::Api(format!(
+                    "LMU {endpoint} returned an unexpected shape: {msg}"
+                )))
+            }
+        }
     }
 
     pub fn strategy_usage(&mut self) -> Result<types::StrategyUsage> {

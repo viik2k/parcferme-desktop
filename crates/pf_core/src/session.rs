@@ -87,10 +87,27 @@ impl Recorder {
     }
 
     /// Start a recording in `dir` (the seam the tests use).
+    ///
+    /// Never truncates: two recordings started in the same second (a rollover
+    /// right after the game opened) would otherwise share a name, and
+    /// `File::create` would wipe the first. The later one takes the next free
+    /// second instead, so the name stays a parseable timestamp.
     pub fn create_in(dir: &Path) -> Result<Recorder> {
         fs::create_dir_all(dir)?;
-        let path = dir.join(format!("session-{}.jsonl", now_unix()));
-        let out = BufWriter::new(File::create(&path)?);
+        let mut unix = now_unix();
+        let (path, file) = loop {
+            let path = dir.join(format!("session-{unix}.jsonl"));
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => break (path, file),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => unix += 1,
+                Err(e) => return Err(e.into()),
+            }
+        };
+        let out = BufWriter::new(file);
         Ok(Recorder {
             path,
             out,
@@ -242,6 +259,50 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// The bug that labelled a fresh race with a month-old one: the menus show
+    /// the last combo loaded, so the label comes from the car being driven,
+    /// and the clock starts when it first moves.
+    #[test]
+    fn summarize_labels_the_driven_combo_not_the_menu_one() {
+        let dir = std::env::temp_dir().join(format!("pf-driven-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        let mut rec = Recorder::create_in(&dir).expect("create recorder");
+        // Two files opened in the same second must not share (and truncate) a name.
+        let other = Recorder::create_in(&dir).expect("second recorder");
+        assert_ne!(rec.path(), other.path());
+        drop(other);
+
+        let mut frame = crate::lmu::Frame {
+            car_name: "Old Car".into(),
+            track_name: "Old Track".into(),
+            ..Default::default()
+        };
+        rec.write(&frame).unwrap(); // menus, stale combo, stationary
+        frame.t_ms = 60_000;
+        frame.car_name = "Ferrari 499P".into();
+        frame.track_name = "Le Mans 24h".into();
+        rec.write(&frame).unwrap(); // loaded, still in the garage
+        frame.t_ms = 90_000;
+        frame.speed_kph = 120.0;
+        rec.write(&frame).unwrap();
+        frame.t_ms = 100_000;
+        rec.write(&frame).unwrap();
+        let path = rec.path().to_path_buf();
+        drop(rec);
+
+        let s = summarize(&path).expect("summarize");
+        assert_eq!(
+            (s.car.as_str(), s.track.as_str()),
+            ("Ferrari 499P", "Le Mans 24h")
+        );
+        assert!(s.driven);
+        assert_eq!(s.duration_s, 10.0);
+        assert_eq!(s.started_unix, started_unix(&path) + 90);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     /// The share path takes a file name from the UI, so it must refuse anything
     /// that could walk out of the sessions folder — before it touches the
     /// keychain or the network.
@@ -259,6 +320,15 @@ mod tests {
 
 // --------------------------------------------------------------- for sharing
 
+/// Faster than this and the car is being driven. The menus, the garage and a
+/// paused game all sit at exactly 0, so the margin is only for creep.
+const MOVING_KPH: f64 = 5.0;
+
+/// Whether a frame at this speed is a car on track rather than the menus.
+pub fn is_moving(speed_kph: f64) -> bool {
+    speed_kph > MOVING_KPH
+}
+
 /// The fields of a frame a summary needs. Everything else in the line is
 /// ignored, which keeps a 200 MB file's scan to the parse of six values a line.
 #[derive(Deserialize)]
@@ -270,6 +340,8 @@ struct SummaryLine {
     track_name: String,
     #[serde(default)]
     last_lap_time_s: Option<f64>,
+    #[serde(default)]
+    speed_kph: f64,
 }
 
 /// What a recorded file says about itself — the metadata SERVER_CONTRACT §10's
@@ -282,19 +354,26 @@ pub struct Summary {
     pub car: String,
     /// The game's own name for the track, e.g. "Le Mans 24h".
     pub track: String,
+    /// When the car first moved (the file's start if it never did).
     pub started_unix: u64,
-    /// Wall clock from the first frame to the last.
+    /// Wall clock from the first moving frame to the last: the menus either
+    /// side aren't session time. The whole file if it never moved.
     pub duration_s: f64,
     pub frames: u64,
     /// Fastest completed lap in the recording, if any.
     pub best_lap_s: Option<f64>,
+    /// Whether the car ever moved. One that never did is a game that sat in
+    /// the menus: nothing worth sending.
+    pub driven: bool,
 }
 
 /// Read a recorded session end to end and describe it.
 ///
-/// Car and track are taken from the first frame that *has* them rather than the
-/// first frame: a recording that starts in the garage opens with several
-/// seconds of empty names, and a session labelled "" is worthless to share.
+/// Car and track come from the first frame where the car is **moving**, not
+/// the first frame that merely has names: LMU's menus publish the last combo
+/// you loaded, possibly weeks old, and labelling by that filed a 2026-09-26
+/// race under a month-old car and track. The first non-empty names are only
+/// the fallback for a recording that never moved.
 ///
 /// A malformed line is skipped, not fatal — the last line of a session that
 /// ended in a crash is routinely half-written, and that session is exactly the
@@ -302,9 +381,10 @@ pub struct Summary {
 pub fn summarize(path: &Path) -> Result<Summary> {
     let mut first_t = None;
     let mut last_t = 0;
+    let mut driven_t: Option<(u64, u64)> = None;
     let mut frames = 0;
-    let mut car = String::new();
-    let mut track = String::new();
+    let mut menu_names = (String::new(), String::new());
+    let mut driven_names = None;
     let mut best_lap_s: Option<f64> = None;
 
     for line in BufReader::new(File::open(path)?).lines() {
@@ -315,11 +395,17 @@ pub fn summarize(path: &Path) -> Result<Summary> {
         frames += 1;
         first_t.get_or_insert(frame.t_ms);
         last_t = frame.t_ms;
-        if car.is_empty() && !frame.car_name.is_empty() {
-            car = frame.car_name;
+        if is_moving(frame.speed_kph) {
+            driven_t = Some((driven_t.map_or(frame.t_ms, |(from, _)| from), frame.t_ms));
+            if driven_names.is_none() && !frame.car_name.is_empty() {
+                driven_names = Some((frame.car_name.clone(), frame.track_name.clone()));
+            }
         }
-        if track.is_empty() && !frame.track_name.is_empty() {
-            track = frame.track_name;
+        if menu_names.0.is_empty() {
+            menu_names.0 = frame.car_name;
+        }
+        if menu_names.1.is_empty() {
+            menu_names.1 = frame.track_name;
         }
         if let Some(lap) = frame.last_lap_time_s {
             if best_lap_s.is_none_or(|best| lap < best) {
@@ -328,13 +414,19 @@ pub fn summarize(path: &Path) -> Result<Summary> {
         }
     }
 
+    let first_t = first_t.unwrap_or(0);
+    let (from, to) = driven_t.unwrap_or((first_t, last_t));
+    let (car, track) = driven_names.unwrap_or(menu_names);
     Ok(Summary {
         car,
         track,
-        started_unix: started_unix(path),
-        duration_s: (last_t - first_t.unwrap_or(0)) as f64 / 1000.0,
+        // `t_ms` counts from the source's start, which a rolled-over file
+        // doesn't share, so offset from this file's own first frame.
+        started_unix: started_unix(path) + (from - first_t) / 1000,
+        duration_s: (to - from) as f64 / 1000.0,
         frames,
         best_lap_s,
+        driven: driven_t.is_some(),
     })
 }
 
@@ -393,21 +485,24 @@ fn is_bare_file_name(file: &str) -> bool {
 /// what [`list`] gave it, and joining a caller-supplied path here would let a
 /// `..` walk out of the sessions folder and upload anything on disk.
 ///
+/// `Ok(None)` means there is nothing worth sending (the car never moved), so
+/// the caller can throw the file away.
+///
 /// Blocking and slow by nature — the scan reads the whole file and the PUT
 /// sends every compressed byte — so callers run it off the UI thread.
-pub fn share(file: &str, private: bool) -> Result<UploadResult> {
+pub fn share(file: &str, private: bool) -> Result<Option<UploadResult>> {
     if !is_bare_file_name(file) {
         return Err(Error::Api(format!("{file:?} is not a session file name")));
     }
+    // Before the scan: signed out, the sync loop retries every few seconds,
+    // and each retry would otherwise read the whole tens-of-MB file first.
+    let token = auth::current_token()?.ok_or(Error::NotLinked)?;
     let path = dir()?.join(file);
     let summary = summarize(&path)?;
-    if summary.frames == 0 {
-        return Err(Error::Api(format!(
-            "{file} has no frames in it — nothing to share"
-        )));
+    if !summary.driven {
+        return Ok(None);
     }
 
-    let token = auth::current_token()?.ok_or(Error::NotLinked)?;
     let body = gzip(&path)?;
     log::info!(
         "sharing {file}: {} frames, {:.0}s, {} -> {} bytes gzipped",
@@ -442,5 +537,7 @@ pub fn share(file: &str, private: bool) -> Result<UploadResult> {
     client.put_presigned(&pending.upload_url, &body)?;
     // Only now is the row worth showing: a session that never finished its PUT
     // must not appear on the site pointing at bytes that aren't there.
-    client.complete_telemetry(token.as_str(), &pending.id)
+    client
+        .complete_telemetry(token.as_str(), &pending.id)
+        .map(Some)
 }

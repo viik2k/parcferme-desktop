@@ -22,7 +22,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
@@ -33,6 +33,9 @@ use crate::{Error, Result};
 
 /// How long to wait before looking for the game again.
 const IDLE_POLL: Duration = Duration::from_secs(5);
+
+/// How long to leave the queue alone after a sweep failed offline or signed out.
+const PUSH_BACKOFF: Duration = Duration::from_secs(60);
 
 /// A recording smaller than this never saw a lap — a couple of frames from a
 /// game that opened and closed. The server has nothing to do with it.
@@ -135,15 +138,24 @@ fn run() {
     // disabled gets a warning every five seconds for the rest of the session.
     let mut last_err = String::new();
 
+    // Offline or the server down: every retry reads and gzips whole recordings,
+    // so a failed sweep waits PUSH_BACKOFF rather than one IDLE_POLL.
+    let mut push_after = Instant::now();
+
     loop {
         let settings = Settings::load_default();
         if settings.sync_enabled {
-            push_pending();
+            if Instant::now() >= push_after && !push_pending() {
+                push_after = Instant::now() + PUSH_BACKOFF;
+            }
             match Lmu::start(LmuConfig::default()) {
                 Ok(source) => {
                     last_err.clear();
                     record(&source);
-                    continue; // straight back round to push what was just recorded
+                    // Push what was just recorded on the next pass. Still
+                    // nap first: `record` returns at once when the file
+                    // can't be opened, and looping straight back would spin.
+                    push_after = Instant::now();
                 }
                 Err(e) => {
                     let msg = e.to_string();
@@ -161,13 +173,13 @@ fn run() {
     }
 }
 
-/// Record `source` until the game exits.
-fn record(source: &Lmu) {
-    let mut rec = match session::Recorder::create() {
+/// Open a recording and publish it as the live one.
+fn open_recording() -> Option<session::Recorder> {
+    let rec = match session::Recorder::create() {
         Ok(rec) => rec,
         Err(e) => {
             log::warn!("sync: couldn't open a recording: {e}");
-            return;
+            return None;
         }
     };
     log::info!("sync: recording to {}", rec.path().display());
@@ -181,24 +193,60 @@ fn record(source: &Lmu) {
         started_unix: now_unix(),
         ..Live::default()
     });
+    Some(rec)
+}
+
+/// Record `source` until the game exits or sync is switched off.
+///
+/// One game run can hold several sessions, so a new file starts whenever the
+/// car is driven in a different car/track combo from the one this file was
+/// driven in. Otherwise a Spa stint and a Le Mans race land in one upload,
+/// labelled with whichever came first.
+fn record(source: &Lmu) {
+    let Some(mut rec) = open_recording() else {
+        return;
+    };
     RECORDING.store(true, Ordering::Relaxed);
+    // The combo this file has been driven in; `None` while it's all menus.
+    let mut driven: Option<(String, String)> = None;
+    let mut checked = Instant::now();
 
     loop {
+        // Switching sync off means stop recording, not "stop after the game
+        // closes". Settings are a file read, so only every few seconds.
+        if checked.elapsed() >= IDLE_POLL {
+            checked = Instant::now();
+            if !Settings::load_default().sync_enabled {
+                log::info!("sync: switched off, recording stopped");
+                break;
+            }
+        }
         match source.next_frame_timeout(Duration::from_millis(250)) {
             Some(frame) => {
+                let moving = session::is_moving(frame.speed_kph) && !frame.car_name.is_empty();
+                let combo = || (frame.car_name.clone(), frame.track_name.clone());
+                if moving {
+                    match &driven {
+                        None => driven = Some(combo()),
+                        Some(d) if *d != combo() => {
+                            log::info!("sync: new car/track, starting a new recording");
+                            let Some(next) = open_recording() else { break };
+                            rec = next; // closes the finished one
+                            driven = Some(combo());
+                        }
+                        Some(_) => {}
+                    }
+                }
                 if let Err(e) = rec.write(&frame) {
                     log::warn!("sync: recording stopped: {e}");
                     break;
                 }
-                // Car and track arrive when the driver loads a session, not
-                // when the game opens — take the first non-empty pair and
-                // leave it alone after that.
+                // The menus show the last combo loaded, possibly weeks old, so
+                // the car on track overrides whatever the menu said.
                 if let Some(live) = lock(&LIVE).as_mut() {
                     live.frames = rec.frames();
-                    if live.car.is_empty() {
+                    if moving || live.car.is_empty() {
                         live.car.clone_from(&frame.car_name);
-                    }
-                    if live.track.is_empty() {
                         live.track.clone_from(&frame.track_name);
                     }
                 }
@@ -216,16 +264,17 @@ fn record(source: &Lmu) {
 }
 
 /// Push every recording on disk, oldest first, deleting each one the server
-/// has accepted.
+/// has accepted. Returns false when the sweep stopped early on a transient
+/// failure, so the caller can back off.
 ///
 /// `NotLinked` and `Http` end the sweep: they share one cause (offline,
 /// signed out, server down), and hammering the API once per file helps
-/// nobody. The files stay put and the next cycle tries again. `Api` is a
+/// nobody. The files stay put and a later cycle tries again. `Api` is a
 /// per-file rejection (413, 403, 422, ...) that will not resolve by retrying
-/// — it is skipped so it cannot block every recording behind it, though the
-/// file itself is left on disk (retention policy is a separate question).
-fn push_pending() {
-    let Ok(dir) = session::dir() else { return };
+/// — the file is renamed out of the queue (kept on disk as `.rejected`, so
+/// nothing is lost) instead of being re-uploaded every cycle forever.
+fn push_pending() -> bool {
+    let Ok(dir) = session::dir() else { return true };
     let mut sessions = session::list();
     sessions.reverse();
 
@@ -247,13 +296,15 @@ fn push_pending() {
             // waits, and signing in drains the queue.
             Err(Error::NotLinked) => {
                 log::debug!("sync: signed out — {} waits", s.file);
-                return;
+                return false;
             }
             // A permanent per-file rejection: retrying it won't help, but it
             // also isn't evidence anything is wrong with the other files in
             // the queue, so the sweep keeps going.
             Err(e @ Error::Api(_)) => {
                 log::warn!("sync: {} permanently rejected, skipping: {e}", s.file);
+                let from = dir.join(&s.file);
+                let _ = std::fs::rename(&from, from.with_extension("jsonl.rejected"));
                 *lock(&LAST) = Some(LastPush {
                     file: s.file,
                     at_unix: now_unix(),
@@ -269,10 +320,11 @@ fn push_pending() {
                     url: None,
                     error: Some(e.to_string()),
                 });
-                return;
+                return false;
             }
         }
     }
+    true
 }
 
 /// One upload. Private: the site has no public telemetry feed yet.
@@ -280,7 +332,12 @@ fn push_pending() {
 /// ponytail: hard-coded visibility. Add a Settings toggle when there's
 /// somewhere public for a session to land.
 fn push(file: &str) -> Result<()> {
-    let shared = session::share(file, true)?;
+    let Some(shared) = session::share(file, true)? else {
+        // The car never moved: a game that sat in the menus. Not a push,
+        // so the last-push line keeps showing the real last one.
+        log::debug!("sync: {file} never left the menus, dropping it");
+        return Ok(());
+    };
     log::info!("sync: pushed {file} -> {}", shared.url);
     *lock(&LAST) = Some(LastPush {
         file: file.to_string(),

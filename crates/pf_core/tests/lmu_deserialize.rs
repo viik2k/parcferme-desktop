@@ -194,6 +194,17 @@ fn pit_recommendations_parse_off_the_real_capture() {
 }
 
 #[test]
+fn a_null_list_reads_as_empty_rather_than_failing_the_whole_parse() {
+    // LMU sends `null` for an empty list mid-race; before, one such field threw
+    // away the pit menu, wear and weather for every poll of the session.
+    let mut v: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/repair_and_refuel.json")).unwrap();
+    v["wearables"]["brakes"] = serde_json::Value::Null;
+    let rr: RepairAndRefuel = serde_json::from_value(v).expect("null list parses");
+    assert!(rr.wearables.expect("wearables").brakes.is_empty());
+}
+
+#[test]
 fn a_missing_endpoint_body_is_an_error_not_a_panic() {
     // Out of session, these endpoints return `null` or an empty body.
     assert!(serde_json::from_str::<Standings>("").is_err());
