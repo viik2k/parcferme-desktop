@@ -28,7 +28,32 @@ const DEVICE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 /// A configured HTTP client bound to one parcferme.cc origin.
 pub struct ApiClient {
     base_url: String,
+    /// JSON round trips: one short deadline for the whole call.
     agent: ureq::Agent,
+    /// Byte transfers (the telemetry PUT): see [`transfer_agent`].
+    transfer: ureq::Agent,
+}
+
+/// Connect deadline shared by every agent in the crate.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Whole-call deadline for a JSON round trip.
+const JSON_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How long a byte transfer may sit without moving a single byte before it is
+/// declared dead. Idle, not total: a 20 MB session on a slow uplink takes as
+/// long as it takes, but a stalled socket still gives up.
+const TRANSFER_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// An agent for moving file bytes (setup downloads, the telemetry PUT): a
+/// connect deadline and per-read/per-write idle deadlines, no overall cap.
+pub(crate) fn transfer_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(CONNECT_TIMEOUT)
+        .timeout_read(TRANSFER_IDLE_TIMEOUT)
+        .timeout_write(TRANSFER_IDLE_TIMEOUT)
+        .user_agent(concat!("pf-desktop/", env!("CARGO_PKG_VERSION")))
+        .build()
 }
 
 /// Response of `POST /api/device/code` (RFC 8628 §3.2).
@@ -256,12 +281,14 @@ impl ApiClient {
     /// Build a client for an explicit base URL.
     pub fn new(base_url: impl Into<String>) -> Self {
         let agent = ureq::AgentBuilder::new()
-            .timeout(Duration::from_secs(20))
+            .timeout_connect(CONNECT_TIMEOUT)
+            .timeout(JSON_TIMEOUT)
             .user_agent(concat!("pf-desktop/", env!("CARGO_PKG_VERSION")))
             .build();
         Self {
             base_url: normalize_base(base_url.into()),
             agent,
+            transfer: transfer_agent(),
         }
     }
 
@@ -470,9 +497,12 @@ impl ApiClient {
     /// No `Authorization` header: the signature in the URL is the auth, and
     /// sending a bearer token to a third-party origin would leak it. The URL
     /// itself is a secret — never log it.
+    ///
+    /// Goes over the transfer agent: a 20 s whole-call deadline would fail any
+    /// long stint on an ordinary home uplink, every cycle, forever (#35).
     pub fn put_presigned(&self, url: &str, bytes: &[u8]) -> Result<()> {
         match self
-            .agent
+            .transfer
             .put(url)
             .set("Content-Type", "application/gzip")
             .send_bytes(bytes)

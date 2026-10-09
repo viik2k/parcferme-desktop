@@ -78,6 +78,29 @@ fn team_sync_toasts(app: &tauri::AppHandle) {
     }
 }
 
+/// Toast once when the sync engine finds the game running but unrecordable
+/// (plugins disabled, #36).
+///
+/// The Sync tab already shows it, but that is the one screen nobody opens
+/// while they believe everything is working, and the fix needs a full game
+/// restart: finding out from the log costs the evening's recordings. One toast
+/// per occurrence: it re-arms when the blocker clears (the game closes), so a
+/// relaunch still without plugins toasts again, but a long session doesn't nag.
+fn sync_blocked_toasts(app: &tauri::AppHandle) {
+    let mut toasted: Option<String> = None;
+    loop {
+        match pf_core::sync::blocked() {
+            Some(b) if toasted.as_deref() != Some(b.kind.as_str()) => {
+                let _ = notify(app, "Le Mans Ultimate isn't being recorded", &b.message);
+                toasted = Some(b.kind);
+            }
+            Some(_) => {}
+            None => toasted = None,
+        }
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+}
+
 /// Structured file logging (M4) to
 /// `%LOCALAPPDATA%\cc.parcferme.desktop\logs\pf-desk.log`, plus stdout in dev.
 /// `pf_core` logs at debug for support traces. **No secrets** — tokens and
@@ -276,6 +299,15 @@ pub fn run() {
                     .spawn(move || team_sync_toasts(&toast_handle))
                 {
                     log::error!("team sync toast thread didn't start: {e}");
+                }
+            }
+            {
+                let toast_handle = app.handle().clone();
+                if let Err(e) = std::thread::Builder::new()
+                    .name("pf-sync-blocked-toasts".into())
+                    .spawn(move || sync_blocked_toasts(&toast_handle))
+                {
+                    log::error!("sync blocked toast thread didn't start: {e}");
                 }
             }
             // The window is created hidden (tauri.conf.json); autostart launches

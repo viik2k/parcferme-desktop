@@ -16,6 +16,18 @@ export interface LastPush {
   atUnix: number;
   url: string | null;
   error: string | null;
+  /** Refused outright: set aside as `.rejected`, not retried. */
+  rejected: boolean;
+}
+
+/**
+ * Why the engine can't record although the game is up — mirrors
+ * `pf_core::sync::Blocked`. `kind` is an `Error::kind()`, so `errorHint`
+ * applies to it.
+ */
+export interface Blocked {
+  kind: string;
+  message: string;
 }
 
 /** One recording on disk — mirrors `pf_core::session::Session`. */
@@ -32,6 +44,8 @@ export interface SyncStatus {
   /** Finished recordings waiting to be pushed, newest first. */
   pending: Session[];
   lastPush: LastPush | null;
+  /** Set while the game is running but can't be recorded (plugins off). */
+  blocked: Blocked | null;
 }
 
 export const syncStatus = () => invoke<SyncStatus>("sync_status");

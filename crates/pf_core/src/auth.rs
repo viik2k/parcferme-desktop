@@ -88,6 +88,7 @@ pub fn poll_device_flow(client: &ApiClient, device_code: &str) -> Result<FlowOut
             if let Some(user) = token.user.as_ref() {
                 let _ = store_user(user);
             }
+            crate::options::clear_cache();
             Ok(FlowOutcome::Linked { user: token.user })
         }
         TokenPoll::Pending => Ok(FlowOutcome::Pending),
@@ -144,6 +145,7 @@ pub fn store_user(user: &DeviceUser) -> Result<()> {
 pub fn sign_out() -> Result<()> {
     delete_entry(entry()?)?;
     delete_entry(user_entry()?)?;
+    crate::options::clear_cache();
     log::info!("signed out — token and cached profile cleared");
     Ok(())
 }

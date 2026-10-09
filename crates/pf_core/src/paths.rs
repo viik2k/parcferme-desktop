@@ -345,11 +345,77 @@ fn reg_read(key: &str, value: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+/// The user's Documents folder, wherever it really is.
+///
+/// Asks the Known Folder API first: OneDrive Known Folder Move (the default on
+/// a fresh Windows 11 signed into a Microsoft account) puts Documents under
+/// `%USERPROFILE%\OneDrive\Documents`, and the literal `%USERPROFILE%\Documents`
+/// usually doesn't exist (#39). The join stays as the fallback, and a Settings
+/// override still wins over both.
 #[cfg(windows)]
 fn documents_dir() -> Option<PathBuf> {
-    // M2 will use the Known Folder API for OneDrive-redirected Documents;
-    // the USERPROFILE join is a correct default for the common case.
-    std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join("Documents"))
+    known_documents_dir()
+        .or_else(|| std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join("Documents")))
+}
+
+/// `SHGetKnownFolderPath(FOLDERID_Documents)`.
+///
+/// ponytail: raw shell32/ole32 declarations, the same trade `lmu/shm_win.rs`
+/// makes for kernel32 — two functions don't earn the `windows` crate.
+#[cfg(windows)]
+fn known_documents_dir() -> Option<PathBuf> {
+    use std::ffi::c_void;
+    use std::os::windows::ffi::OsStringExt;
+
+    #[repr(C)]
+    struct Guid {
+        data1: u32,
+        data2: u16,
+        data3: u16,
+        data4: [u8; 8],
+    }
+
+    // {FDD39AD0-238F-46AF-ADB4-6C85480369C7}
+    const FOLDERID_DOCUMENTS: Guid = Guid {
+        data1: 0xFDD3_9AD0,
+        data2: 0x238F,
+        data3: 0x46AF,
+        data4: [0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7],
+    };
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SHGetKnownFolderPath(
+            rfid: *const Guid,
+            flags: u32,
+            token: *mut c_void,
+            path: *mut *mut u16,
+        ) -> i32;
+    }
+    #[link(name = "ole32")]
+    extern "system" {
+        fn CoTaskMemFree(pv: *mut c_void);
+    }
+
+    let mut raw: *mut u16 = std::ptr::null_mut();
+    // SAFETY: FFI with a valid GUID pointer, default flags, the current user
+    // (null token) and an out-pointer the call fills. The buffer belongs to us
+    // either way and is freed below; CoTaskMemFree(null) is a no-op.
+    let hr =
+        unsafe { SHGetKnownFolderPath(&FOLDERID_DOCUMENTS, 0, std::ptr::null_mut(), &mut raw) };
+    let path = if hr >= 0 && !raw.is_null() {
+        // SAFETY: on success `raw` is a NUL-terminated UTF-16 string.
+        let wide = unsafe {
+            let len = (0..).take_while(|&i| *raw.add(i) != 0).count();
+            std::slice::from_raw_parts(raw, len)
+        };
+        Some(PathBuf::from(std::ffi::OsString::from_wide(wide)))
+    } else {
+        None
+    };
+    // SAFETY: `raw` came from SHGetKnownFolderPath (or is still null).
+    unsafe { CoTaskMemFree(raw.cast()) };
+    path.filter(|p| !p.as_os_str().is_empty())
 }
 
 #[cfg(not(windows))]

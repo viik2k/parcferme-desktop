@@ -69,6 +69,35 @@ pub struct LastPush {
     pub url: Option<String>,
     /// Why it didn't, when it didn't.
     pub error: Option<String>,
+    /// The server refused this recording outright, so it was set aside as
+    /// `.rejected` rather than left in the queue to retry.
+    pub rejected: bool,
+}
+
+/// Why the engine can't record although the game is running: a reason the
+/// driver has to act on, so the Sync tab shows it instead of "waiting".
+///
+/// `kind` is [`Error::kind`], the same key the IPC error contract uses, so the
+/// UI picks its recovery hint off the kind and never matches on prose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Blocked {
+    pub kind: String,
+    pub message: String,
+}
+
+impl Blocked {
+    /// The blocker a failed start reports, or `None` for the ordinary states.
+    /// The game not running is the normal idle state, not a blocker (#36).
+    fn from_start_error(e: &Error) -> Option<Self> {
+        match e {
+            Error::LmuNotRunning => None,
+            e => Some(Self {
+                kind: e.kind().to_string(),
+                message: e.to_string(),
+            }),
+        }
+    }
 }
 
 /// Everything the Sync tab renders.
@@ -83,11 +112,14 @@ pub struct Status {
     /// written is *not* in here — it isn't waiting, it's still happening.
     pub pending: Vec<Session>,
     pub last_push: Option<LastPush>,
+    /// Set while the game is up but can't be recorded (plugins disabled).
+    pub blocked: Option<Blocked>,
 }
 
 static RECORDING: AtomicBool = AtomicBool::new(false);
 static LIVE: Mutex<Option<Live>> = Mutex::new(None);
 static LAST: Mutex<Option<LastPush>> = Mutex::new(None);
+static BLOCKED: Mutex<Option<Blocked>> = Mutex::new(None);
 
 /// A poisoned lock here means a thread panicked mid-update, which costs the UI
 /// one stale status line and nothing more — never a crash.
@@ -106,6 +138,12 @@ pub fn is_recording() -> bool {
     RECORDING.load(Ordering::Relaxed)
 }
 
+/// Why the engine can't record right now, if it's something the driver must
+/// fix. A mutex read, cheap enough for the tray to poll.
+pub fn blocked() -> Option<Blocked> {
+    lock(&BLOCKED).clone()
+}
+
 /// What the engine is doing. Cheap enough to poll on a timer.
 pub fn status() -> Status {
     let recording = lock(&LIVE).clone();
@@ -118,6 +156,7 @@ pub fn status() -> Status {
             .collect(),
         recording,
         last_push: lock(&LAST).clone(),
+        blocked: blocked(),
     }
 }
 
@@ -151,6 +190,7 @@ fn run() {
             match Lmu::start(LmuConfig::default()) {
                 Ok(source) => {
                     last_err.clear();
+                    *lock(&BLOCKED) = None;
                     record(&source);
                     // Push what was just recorded on the next pass. Still
                     // nap first: `record` returns at once when the file
@@ -158,6 +198,7 @@ fn run() {
                     push_after = Instant::now();
                 }
                 Err(e) => {
+                    *lock(&BLOCKED) = Blocked::from_start_error(&e);
                     let msg = e.to_string();
                     if msg != last_err {
                         match e {
@@ -168,6 +209,9 @@ fn run() {
                     }
                 }
             }
+        } else {
+            // Off means off: no stale blocker left behind for the tab.
+            *lock(&BLOCKED) = None;
         }
         std::thread::sleep(IDLE_POLL);
     }
@@ -310,6 +354,7 @@ fn push_pending() -> bool {
                     at_unix: now_unix(),
                     url: None,
                     error: Some(e.to_string()),
+                    rejected: true,
                 });
             }
             Err(e) => {
@@ -319,6 +364,7 @@ fn push_pending() -> bool {
                     at_unix: now_unix(),
                     url: None,
                     error: Some(e.to_string()),
+                    rejected: false,
                 });
                 return false;
             }
@@ -344,6 +390,22 @@ fn push(file: &str) -> Result<()> {
         at_unix: now_unix(),
         url: Some(shared.url),
         error: None,
+        rejected: false,
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_fixable_start_failure_blocks() {
+        // The game being closed is the normal idle state.
+        assert_eq!(Blocked::from_start_error(&Error::LmuNotRunning), None);
+        // Plugins off is the one the driver must act on, carried by kind.
+        let b = Blocked::from_start_error(&Error::LmuPluginsDisabled).unwrap();
+        assert_eq!(b.kind, "lmu_plugins_disabled");
+        assert!(b.message.contains("Enable Plugins"));
+    }
 }
