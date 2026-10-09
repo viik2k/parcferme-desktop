@@ -25,6 +25,11 @@ use crate::{auth, Result};
 /// Cached lists keyed by sim id. The lists change when the site seeds new
 /// cars or tracks — once per app run is fresh enough, and it keeps a
 /// re-opened form instant.
+///
+/// Only a real answer is cached. A failed fetch or an empty one (offline at
+/// login, not linked yet) is retried on the next form open: this is a tray app
+/// that runs for days, and a cached empty list silently switches off the car
+/// matching `upload::identify` relies on (#38).
 static CACHE: Mutex<Option<HashMap<&'static str, SetupOptions>>> = Mutex::new(None);
 
 /// Car/track name lists the site knows for `sim`, for the upload form's
@@ -36,8 +41,10 @@ pub fn options_for(sim: Sim) -> SetupOptions {
     if let Some(hit) = map.get(sim.id()) {
         return hit.clone();
     }
-    let options = fetch(sim).unwrap_or_else(|e| {
-        // Not an error path for the user — just no autocomplete this run.
+    let fetched = fetch(sim);
+    let cache_it = worth_caching(&fetched);
+    let options = fetched.unwrap_or_else(|e| {
+        // Not an error path for the user — just no autocomplete this time.
         log::warn!("setup options unavailable for {}: {e}", sim.id());
         SetupOptions::default()
     });
@@ -47,8 +54,22 @@ pub fn options_for(sim: Sim) -> SetupOptions {
         options.cars.len(),
         options.tracks.len()
     );
-    map.insert(sim.id(), options.clone());
+    if cache_it {
+        map.insert(sim.id(), options.clone());
+    }
     options
+}
+
+/// Forget every cached list. Called when the linked account changes (connect,
+/// sign out), the two moments the answer can change identity, not just age.
+pub fn clear_cache() {
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// A fetch is worth keeping for the rest of the run only if it succeeded and
+/// actually carried something.
+fn worth_caching(fetched: &Result<SetupOptions>) -> bool {
+    matches!(fetched, Ok(o) if !(o.cars.is_empty() && o.tracks.is_empty()))
 }
 
 /// One authenticated request for `sim`'s lists. Separate from the caching so
@@ -65,6 +86,20 @@ fn fetch(sim: Sim) -> Result<SetupOptions> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Error;
+
+    #[test]
+    fn only_a_real_answer_is_cached() {
+        let full = SetupOptions {
+            cars: vec!["Ferrari 499P".into()],
+            ..SetupOptions::default()
+        };
+        assert!(worth_caching(&Ok(full)));
+        // Signed out or a site with nothing yet: retry next time.
+        assert!(!worth_caching(&Ok(SetupOptions::default())));
+        // Offline at login.
+        assert!(!worth_caching(&Err(Error::Http("offline".into()))));
+    }
 
     /// Hits the live site as the currently paired device, so ignored by
     /// default: run
