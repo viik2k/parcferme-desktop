@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { toCmdError } from "../lib/errors";
+import { errorHint, toCmdError } from "../lib/errors";
 import { getSettings, saveSettings, type Settings } from "../lib/settings";
 import {
   bytes,
@@ -68,6 +68,7 @@ export function SyncPanel() {
   const enabled = settings?.syncEnabled ?? false;
   const queue = status?.pending ?? [];
   const last = status?.lastPush ?? null;
+  const blocked = enabled ? (status?.blocked ?? null) : null;
 
   return (
     <div className="divide-y divide-border">
@@ -76,7 +77,7 @@ export function SyncPanel() {
           Record and upload my sessions
           <span className="mt-0.5 block text-[10px] text-muted">
             Every Le Mans Ultimate session is recorded and pushed to your
-            private library when you leave the track.
+            private library once you close the game.
           </span>
         </span>
         <input
@@ -112,6 +113,16 @@ export function SyncPanel() {
               </span>
             </div>
           </>
+        ) : blocked ? (
+          <div className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive ring-1 ring-destructive/30">
+            <span className="flex items-center gap-1.5 font-medium">
+              <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+              Le Mans Ultimate is running but can’t be recorded
+            </span>
+            <span className="mt-0.5 block text-[10px] opacity-80">
+              {errorHint(blocked.kind) ?? blocked.message}
+            </span>
+          </div>
         ) : (
           <div className="flex items-center gap-1.5 text-xs">
             <span
@@ -122,7 +133,7 @@ export function SyncPanel() {
             </span>
           </div>
         )}
-        {enabled && !live && (
+        {enabled && !live && !blocked && (
           <p className="mt-1 text-[10px] text-muted/80">
             Start the game with plugins enabled and recording begins on its own.
           </p>
@@ -182,7 +193,9 @@ export function SyncPanel() {
             <p className="text-[10px] text-destructive">
               {when(last.atUnix)} — {last.error}
               <span className="mt-0.5 block text-muted">
-                It stays in the queue and the engine tries again.
+                {last.rejected
+                  ? "The site refused it, so it won’t be retried. It’s kept in the folder as .rejected."
+                  : "It stays in the queue and the engine tries again."}
               </span>
             </p>
           )}

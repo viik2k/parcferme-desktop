@@ -222,13 +222,15 @@ function SyncBadge({ linked }: { linked: boolean | null }) {
   const [dot, text] =
     linked === false
       ? ["bg-muted", "Not signed in"]
-      : sync?.recording
-        ? ["bg-success animate-pulse", "Recording"]
-        : queued > 0
-          ? ["bg-primary", `${queued} to upload`]
-          : sync?.enabled
-            ? ["bg-success", "Sync on"]
-            : ["bg-muted", "Idle"];
+      : sync?.enabled && sync.blocked
+        ? ["bg-destructive", "Can’t record"]
+        : sync?.recording
+          ? ["bg-success animate-pulse", "Recording"]
+          : queued > 0
+            ? ["bg-primary", `${queued} to upload`]
+            : sync?.enabled
+              ? ["bg-success", "Sync on"]
+              : ["bg-muted", "Idle"];
 
   return (
     <span className="flex items-center gap-1.5 text-[11px] text-muted">
