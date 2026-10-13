@@ -586,7 +586,13 @@ pub fn build_frame(
     let mut brake_temp_c = [None; 4];
     for (i, wheel) in telem.m_wheel.iter().enumerate() {
         let temps = wheel.m_temperature;
-        tyre_temp_c[i] = celsius(mean(&temps));
+        // Any 0 K corner is the unpopulated sentinel; averaging it in first
+        // would turn [0, 351, 352] into -38.8 °C.
+        tyre_temp_c[i] = if temps.iter().any(|&t| t <= 0.0) {
+            None
+        } else {
+            celsius(mean(&temps))
+        };
         tyre_life[i] = wheel.m_wear;
         // Kelvin too, whatever the header's comment claims.
         brake_temp_c[i] = celsius(wheel.m_brake_temp);

@@ -221,6 +221,23 @@ fn a_frame_normalises_units_and_positions() {
 }
 
 #[test]
+fn a_partly_unpopulated_tyre_reads_absent_not_negative() {
+    let mut snap = golden_snapshot();
+    snap.telem.m_wheel[0].m_temperature[0] = 0.0;
+    let frame = build_frame(
+        1,
+        Duration::ZERO,
+        &snap,
+        Arc::new(RestSnapshot::default()),
+        None,
+        Duration::from_secs(3),
+    );
+    assert_eq!(frame.tyre_temp_c[0], None);
+    // Corner 1 is untouched: 360/361/362 K.
+    assert!((frame.tyre_temp_c[1].unwrap() - (361.0 - 273.15)).abs() < 1e-9);
+}
+
+#[test]
 fn rest_fields_that_never_landed_are_marked_stale_not_current() {
     let frame = build_frame(
         0,
