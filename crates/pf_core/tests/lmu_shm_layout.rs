@@ -237,6 +237,39 @@ fn a_partly_unpopulated_tyre_reads_absent_not_negative() {
     assert!((frame.tyre_temp_c[1].unwrap() - (361.0 - 273.15)).abs() < 1e-9);
 }
 
+fn frame_of(snap: &Snapshot) -> pf_core::lmu::Frame {
+    build_frame(
+        1,
+        Duration::ZERO,
+        snap,
+        Arc::new(RestSnapshot::default()),
+        None,
+        Duration::from_secs(3),
+    )
+}
+
+#[test]
+fn a_flat_zero_kelvin_wheel_reads_absent_for_tyre_and_brake() {
+    let mut snap = golden_snapshot();
+    for w in snap.telem.m_wheel.iter_mut() {
+        w.m_temperature = [0.0; 3];
+        w.m_brake_temp = 0.0;
+    }
+    let frame = frame_of(&snap);
+    assert_eq!(frame.tyre_temp_c, [None; 4]);
+    assert_eq!(frame.brake_temp_c, [None; 4]);
+}
+
+#[test]
+fn virtual_energy_is_absent_at_zero_and_present_when_positive() {
+    let mut snap = golden_snapshot();
+    snap.telem.m_virtual_energy = 0.0;
+    assert_eq!(frame_of(&snap).virtual_energy, None);
+    snap.telem.m_virtual_energy = 0.754;
+    let ve = frame_of(&snap).virtual_energy.unwrap();
+    assert!((ve - f64::from(0.754f32)).abs() < 1e-9);
+}
+
 #[test]
 fn rest_fields_that_never_landed_are_marked_stale_not_current() {
     let frame = build_frame(
