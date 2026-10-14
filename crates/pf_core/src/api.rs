@@ -48,12 +48,44 @@ const TRANSFER_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// An agent for moving file bytes (setup downloads, the telemetry PUT): a
 /// connect deadline and per-read/per-write idle deadlines, no overall cap.
 pub(crate) fn transfer_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_connect(CONNECT_TIMEOUT)
-        .timeout_read(TRANSFER_IDLE_TIMEOUT)
-        .timeout_write(TRANSFER_IDLE_TIMEOUT)
+    // ureq 3 has no per-read idle deadline, only per-phase totals. Header
+    // phases keep the short idle deadline; the body phases get a generous total
+    // so a stalled socket still gives up (#35) instead of parking forever.
+    // ponytail: total, not idle — a transfer slower than TRANSFER_BODY_CAP fails;
+    // wrap the reader/body for a true idle timer if that ever bites.
+    ureq::Agent::config_builder()
+        .timeout_connect(Some(CONNECT_TIMEOUT))
+        .timeout_send_request(Some(TRANSFER_IDLE_TIMEOUT))
+        .timeout_recv_response(Some(TRANSFER_IDLE_TIMEOUT))
+        .timeout_send_body(Some(TRANSFER_BODY_CAP))
+        .timeout_recv_body(Some(TRANSFER_BODY_CAP))
         .user_agent(concat!("pf-desktop/", env!("CARGO_PKG_VERSION")))
+        .http_status_as_error(false)
         .build()
+        .into()
+}
+
+/// Upper bound on one byte transfer's body phase; see [`transfer_agent`].
+const TRANSFER_BODY_CAP: Duration = Duration::from_secs(30 * 60);
+
+/// A failed call, with the HTTP status split out so the response body stays
+/// readable (ureq 3 drops it from `ureq::Error` for status errors). Every agent
+/// in the crate is built with `http_status_as_error(false)`; [`checked`] does
+/// the splitting.
+pub(crate) enum Failure {
+    Status(u16, Box<ureq::http::Response<ureq::Body>>),
+    Transport(ureq::Error),
+}
+
+/// Turn a raw ureq result into `Ok` for 2xx and [`Failure`] otherwise.
+pub(crate) fn checked(
+    result: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+) -> std::result::Result<ureq::http::Response<ureq::Body>, Failure> {
+    match result {
+        Ok(resp) if resp.status().is_success() => Ok(resp),
+        Ok(resp) => Err(Failure::Status(resp.status().as_u16(), Box::new(resp))),
+        Err(e) => Err(Failure::Transport(e)),
+    }
 }
 
 /// Response of `POST /api/device/code` (RFC 8628 §3.2).
@@ -280,11 +312,13 @@ struct ErrorBody {
 impl ApiClient {
     /// Build a client for an explicit base URL.
     pub fn new(base_url: impl Into<String>) -> Self {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(CONNECT_TIMEOUT)
-            .timeout(JSON_TIMEOUT)
+        let agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(CONNECT_TIMEOUT))
+            .timeout_global(Some(JSON_TIMEOUT))
             .user_agent(concat!("pf-desktop/", env!("CARGO_PKG_VERSION")))
-            .build();
+            .http_status_as_error(false)
+            .build()
+            .into();
         Self {
             base_url: normalize_base(base_url.into()),
             agent,
@@ -305,33 +339,31 @@ impl ApiClient {
     /// Start the device-authorization grant: ask the server for a device/user
     /// code pair (RFC 8628 §3.1).
     pub fn request_device_code(&self) -> Result<DeviceCodeResponse> {
-        let result = self
-            .agent
-            .post(&self.url("/api/device/code"))
-            .send_json(serde_json::json!({
+        let result = checked(self.agent.post(&self.url("/api/device/code")).send_json(
+            serde_json::json!({
                 "client_id": CLIENT_ID,
                 "scope": "setups:download",
-            }));
+            }),
+        ));
         match result {
             Ok(resp) => read_json(resp),
-            Err(ureq::Error::Status(code, _)) => Err(Error::Api(format!(
+            Err(Failure::Status(code, _)) => Err(Error::Api(format!(
                 "server returned HTTP {code} for /api/device/code — is the ParcFermé desktop API deployed at this URL?"
             ))),
-            Err(e) => Err(map_transport(e)),
+            Err(Failure::Transport(e)) => Err(map_transport(e)),
         }
     }
 
     /// Poll the token endpoint once (RFC 8628 §3.4). Maps the standardized
     /// error codes into [`TokenPoll`] variants so the caller can drive the loop.
     pub fn poll_device_token(&self, device_code: &str) -> Result<TokenPoll> {
-        let result = self
-            .agent
-            .post(&self.url("/api/device/token"))
-            .send_json(serde_json::json!({
+        let result = checked(self.agent.post(&self.url("/api/device/token")).send_json(
+            serde_json::json!({
                 "client_id": CLIENT_ID,
                 "device_code": device_code,
                 "grant_type": DEVICE_GRANT_TYPE,
-            }));
+            }),
+        ));
 
         match result {
             Ok(resp) => {
@@ -350,11 +382,11 @@ impl ApiClient {
                 Ok(TokenPoll::Granted(token))
             }
             // RFC 8628 signals pending/slow_down/etc. as 4xx with an `error` body.
-            Err(ureq::Error::Status(_, resp)) => {
-                let body: ErrorBody = resp.into_json().unwrap_or_default();
+            Err(Failure::Status(_, resp)) => {
+                let body: ErrorBody = resp.into_body().read_json().unwrap_or_default();
                 Ok(map_token_error(&body.error))
             }
-            Err(e) => Err(map_transport(e)),
+            Err(Failure::Transport(e)) => Err(map_transport(e)),
         }
     }
 
@@ -362,20 +394,21 @@ impl ApiClient {
     /// the device token. The server runs the *same* private/`setupShares` access
     /// check it applies to a browser session (Build Plan §6, audit #2).
     pub fn get_download(&self, setup_uuid: &str, token: &str) -> Result<DownloadInfo> {
-        let result = self
-            .agent
-            .get(&self.url(&format!("/api/device/setups/{setup_uuid}/download")))
-            .set("Authorization", &format!("Bearer {token}"))
-            .call();
+        let result = checked(
+            self.agent
+                .get(&self.url(&format!("/api/device/setups/{setup_uuid}/download")))
+                .header("Authorization", &format!("Bearer {token}"))
+                .call(),
+        );
         match result {
             Ok(resp) => read_json(resp),
             // Typed so the UI can hint the right recovery per unhappy path (M4):
             // 401 → reconnect, 403 → ask for access, 404 → stale link.
-            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
-            Err(ureq::Error::Status(403, _)) => Err(Error::AccessDenied),
-            Err(ureq::Error::Status(404, _)) => Err(Error::SetupNotFound),
-            Err(ureq::Error::Status(code, resp)) => Err(api_error("download", code, resp)),
-            Err(e) => Err(map_transport(e)),
+            Err(Failure::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(Failure::Status(403, _)) => Err(Error::AccessDenied),
+            Err(Failure::Status(404, _)) => Err(Error::SetupNotFound),
+            Err(Failure::Status(code, resp)) => Err(api_error("download", code, *resp)),
+            Err(Failure::Transport(e)) => Err(map_transport(e)),
         }
     }
 
@@ -383,16 +416,17 @@ impl ApiClient {
     /// (SERVER_CONTRACT §7a). Authenticated like the rest of the device API;
     /// the caller degrades any failure to "no suggestions".
     pub fn setup_options(&self, token: &str, sim: Sim) -> Result<SetupOptions> {
-        let result = self
-            .agent
-            .get(&self.url("/api/device/options"))
-            .query("sim", sim.id())
-            .set("Authorization", &format!("Bearer {token}"))
-            .call();
+        let result = checked(
+            self.agent
+                .get(&self.url("/api/device/options"))
+                .query("sim", sim.id())
+                .header("Authorization", &format!("Bearer {token}"))
+                .call(),
+        );
         match result {
             Ok(resp) => read_json(resp),
-            Err(ureq::Error::Status(code, resp)) => Err(api_error("options fetch", code, resp)),
-            Err(e) => Err(map_transport(e)),
+            Err(Failure::Status(code, resp)) => Err(api_error("options fetch", code, *resp)),
+            Err(Failure::Transport(e)) => Err(map_transport(e)),
         }
     }
 
@@ -400,17 +434,18 @@ impl ApiClient {
     /// is `"mine"` or `"team"`; the server decides what each covers and
     /// re-checks team membership, so the client never filters access itself.
     pub fn list_setups(&self, token: &str, scope: &str) -> Result<Vec<SetupSummary>> {
-        let result = self
-            .agent
-            .get(&self.url("/api/device/setups"))
-            .query("scope", scope)
-            .set("Authorization", &format!("Bearer {token}"))
-            .call();
+        let result = checked(
+            self.agent
+                .get(&self.url("/api/device/setups"))
+                .query("scope", scope)
+                .header("Authorization", &format!("Bearer {token}"))
+                .call(),
+        );
         match result {
             Ok(resp) => Ok(read_json::<SetupListWire>(resp)?.items),
-            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
-            Err(ureq::Error::Status(code, resp)) => Err(api_error("setup list", code, resp)),
-            Err(e) => Err(map_transport(e)),
+            Err(Failure::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(Failure::Status(code, resp)) => Err(api_error("setup list", code, *resp)),
+            Err(Failure::Transport(e)) => Err(map_transport(e)),
         }
     }
 
@@ -427,8 +462,8 @@ impl ApiClient {
         let mut req = self
             .agent
             .post(&self.url("/api/device/setups/upload"))
-            .set("Authorization", &format!("Bearer {token}"))
-            .set("Content-Type", "application/octet-stream")
+            .header("Authorization", &format!("Bearer {token}"))
+            .header("Content-Type", "application/octet-stream")
             .query("filename", meta.filename)
             .query("sim", meta.sim.id())
             .query("car", meta.car);
@@ -439,7 +474,7 @@ impl ApiClient {
             req = req.query("name", name);
         }
         if !meta.types.is_empty() {
-            req = req.query("types", &meta.types.join(","));
+            req = req.query("types", meta.types.join(","));
         }
         if let Some(notes) = meta.notes {
             req = req.query("notes", notes);
@@ -447,7 +482,7 @@ impl ApiClient {
         if meta.private {
             req = req.query("private", "true");
         }
-        match req.send_bytes(bytes) {
+        match checked(req.send(bytes)) {
             Ok(resp) => {
                 let wire: UploadResultWire = read_json(resp)?;
                 let url = match wire.url {
@@ -456,39 +491,41 @@ impl ApiClient {
                 };
                 Ok(UploadResult { id: wire.id, url })
             }
-            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
-            Err(ureq::Error::Status(403, _)) => Err(Error::Api(
+            Err(Failure::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(Failure::Status(403, _)) => Err(Error::Api(
                 "the server refused this upload — your account may not be allowed to publish setups"
                     .to_string(),
             )),
-            Err(ureq::Error::Status(413, _)) => Err(Error::Api(
+            Err(Failure::Status(413, _)) => Err(Error::Api(
                 "the server rejected the file as too large".to_string(),
             )),
-            Err(ureq::Error::Status(code, resp)) => Err(api_error("upload", code, resp)),
-            Err(e) => Err(map_transport(e)),
+            Err(Failure::Status(code, resp)) => Err(api_error("upload", code, *resp)),
+            Err(Failure::Transport(e)) => Err(map_transport(e)),
         }
     }
 
     /// Create a pending telemetry session and get a presigned PUT for its
     /// bytes (SERVER_CONTRACT §10, call 1 of 3).
     pub fn create_telemetry(&self, token: &str, meta: &TelemetryMeta) -> Result<TelemetryUpload> {
-        match self
+        match checked(
+            self
             .agent
             .post(&self.url("/api/device/telemetry"))
-            .set("Authorization", &format!("Bearer {token}"))
+            .header("Authorization", &format!("Bearer {token}"))
             .send_json(meta)
+        )
         {
             Ok(resp) => read_json(resp),
-            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
-            Err(ureq::Error::Status(403, _)) => Err(Error::Api(
+            Err(Failure::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(Failure::Status(403, _)) => Err(Error::Api(
                 "the server refused this session — your account may not be allowed to share telemetry"
                     .to_string(),
             )),
-            Err(ureq::Error::Status(413, _)) => Err(Error::Api(
+            Err(Failure::Status(413, _)) => Err(Error::Api(
                 "the server rejected the recording as too large".to_string(),
             )),
-            Err(ureq::Error::Status(code, resp)) => Err(api_error("share", code, resp)),
-            Err(e) => Err(map_transport(e)),
+            Err(Failure::Status(code, resp)) => Err(api_error("share", code, *resp)),
+            Err(Failure::Transport(e)) => Err(map_transport(e)),
         }
     }
 
@@ -501,31 +538,31 @@ impl ApiClient {
     /// Goes over the transfer agent: a 20 s whole-call deadline would fail any
     /// long stint on an ordinary home uplink, every cycle, forever (#35).
     pub fn put_presigned(&self, url: &str, bytes: &[u8]) -> Result<()> {
-        match self
-            .transfer
-            .put(url)
-            .set("Content-Type", "application/gzip")
-            .send_bytes(bytes)
-        {
+        match checked(
+            self.transfer
+                .put(url)
+                .header("Content-Type", "application/gzip")
+                .send(bytes),
+        ) {
             Ok(_) => Ok(()),
-            Err(ureq::Error::Status(403, _)) => Err(Error::Api(
+            Err(Failure::Status(403, _)) => Err(Error::Api(
                 "the upload link expired before the session finished uploading — try again"
                     .to_string(),
             )),
-            Err(ureq::Error::Status(code, resp)) => Err(api_error("upload", code, resp)),
-            Err(e) => Err(map_transport(e)),
+            Err(Failure::Status(code, resp)) => Err(api_error("upload", code, *resp)),
+            Err(Failure::Transport(e)) => Err(map_transport(e)),
         }
     }
 
     /// Mark the session complete, which is what makes it visible on the site
     /// (§10, call 3 of 3).
     pub fn complete_telemetry(&self, token: &str, id: &str) -> Result<UploadResult> {
-        match self
-            .agent
-            .post(&self.url(&format!("/api/device/telemetry/{id}/complete")))
-            .set("Authorization", &format!("Bearer {token}"))
-            .send_string("")
-        {
+        match checked(
+            self.agent
+                .post(&self.url(&format!("/api/device/telemetry/{id}/complete")))
+                .header("Authorization", &format!("Bearer {token}"))
+                .send(""),
+        ) {
             Ok(resp) => {
                 let wire: UploadResultWire = read_json(resp)?;
                 let url = match wire.url {
@@ -534,9 +571,9 @@ impl ApiClient {
                 };
                 Ok(UploadResult { id: wire.id, url })
             }
-            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
-            Err(ureq::Error::Status(code, resp)) => Err(api_error("share", code, resp)),
-            Err(e) => Err(map_transport(e)),
+            Err(Failure::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(Failure::Status(code, resp)) => Err(api_error("share", code, *resp)),
+            Err(Failure::Transport(e)) => Err(map_transport(e)),
         }
     }
 
@@ -560,27 +597,28 @@ impl ApiClient {
         filename: &str,
         bytes: &[u8],
     ) -> Result<()> {
-        let result = self
-            .agent
-            .post(&self.url(&format!("/api/device/setups/{setup_uuid}/export")))
-            .set("Authorization", &format!("Bearer {token}"))
-            .set("Content-Type", "text/html")
-            .query("filename", filename)
-            .send_bytes(bytes);
+        let result = checked(
+            self.agent
+                .post(&self.url(&format!("/api/device/setups/{setup_uuid}/export")))
+                .header("Authorization", &format!("Bearer {token}"))
+                .header("Content-Type", "text/html")
+                .query("filename", filename)
+                .send(bytes),
+        );
         match result {
             Ok(_) => Ok(()),
-            Err(ureq::Error::Status(401, _)) => Err(Error::DeviceRevoked),
-            Err(ureq::Error::Status(403, _)) => Err(Error::AccessDenied),
-            Err(ureq::Error::Status(404, _)) => Err(Error::Api(
+            Err(Failure::Status(401, _)) => Err(Error::DeviceRevoked),
+            Err(Failure::Status(403, _)) => Err(Error::AccessDenied),
+            Err(Failure::Status(404, _)) => Err(Error::Api(
                 "this server doesn't accept garage exports yet — the setup uploaded without its \
                  values, which you can add by re-uploading it on the website"
                     .to_string(),
             )),
-            Err(ureq::Error::Status(413, _)) => Err(Error::Api(
+            Err(Failure::Status(413, _)) => Err(Error::Api(
                 "the server rejected the garage export as too large".to_string(),
             )),
-            Err(ureq::Error::Status(code, resp)) => Err(api_error("garage export", code, resp)),
-            Err(e) => Err(map_transport(e)),
+            Err(Failure::Status(code, resp)) => Err(api_error("garage export", code, *resp)),
+            Err(Failure::Transport(e)) => Err(map_transport(e)),
         }
     }
 
@@ -655,8 +693,8 @@ pub struct TelemetryUpload {
 /// A non-2xx from the device API as a user-facing [`Error::Api`], appending the
 /// server's `{"error": …}` message when it sent one. `what` names the operation
 /// ("download", "upload", …).
-fn api_error(what: &str, code: u16, resp: ureq::Response) -> Error {
-    let body: ErrorBody = resp.into_json().unwrap_or_default();
+fn api_error(what: &str, code: u16, resp: ureq::http::Response<ureq::Body>) -> Error {
+    let body: ErrorBody = resp.into_body().read_json().unwrap_or_default();
     let detail = if body.error.is_empty() {
         String::new()
     } else {
@@ -668,12 +706,13 @@ fn api_error(what: &str, code: u16, resp: ureq::Response) -> Error {
 /// Parse a successful response as JSON, but fail with a *clear* message when the
 /// server returns something else — an HTML 404, an apex→www redirect body, or a
 /// proxy error page — instead of the cryptic underlying parse error.
-fn read_json<T: DeserializeOwned>(resp: ureq::Response) -> Result<T> {
-    let status = resp.status();
-    let content_type = resp.content_type().to_string();
+fn read_json<T: DeserializeOwned>(mut resp: ureq::http::Response<ureq::Body>) -> Result<T> {
+    let status = resp.status().as_u16();
+    let content_type = resp.body().mime_type().unwrap_or_default().to_string();
     if !content_type.contains("json") {
         let snippet: String = resp
-            .into_string()
+            .body_mut()
+            .read_to_string()
             .unwrap_or_default()
             .chars()
             .take(80)
@@ -682,7 +721,8 @@ fn read_json<T: DeserializeOwned>(resp: ureq::Response) -> Result<T> {
             "expected JSON but got HTTP {status} ({content_type}). Is the desktop API deployed at this URL? Response began: {snippet:?}"
         )));
     }
-    resp.into_json()
+    resp.body_mut()
+        .read_json()
         .map_err(|e| Error::Api(format!("invalid JSON from server (HTTP {status}): {e}")))
 }
 
