@@ -677,6 +677,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn celsius_treats_non_positive_kelvin_as_absent() {
+        assert_eq!(celsius(0.0), None);
+        assert_eq!(celsius(-1.0), None);
+        assert!((celsius(293.18).unwrap() - 20.03).abs() < 1e-9);
+        assert!((celsius(351.0).unwrap() - 77.85).abs() < 1e-9);
+    }
+
+    #[test]
     fn frame_pacing_is_independent_of_the_games_event_rate() {
         let period = frame_period(10.0);
         assert_eq!(period, Duration::from_millis(100));
