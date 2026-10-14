@@ -220,6 +220,43 @@ fn a_frame_normalises_units_and_positions() {
     assert_eq!(frame.gap_behind_s, Some(2.5));
 }
 
+fn frame_of(snap: &Snapshot) -> pf_core::lmu::Frame {
+    build_frame(
+        0,
+        Duration::ZERO,
+        snap,
+        Arc::new(RestSnapshot::default()),
+        None,
+        Duration::from_secs(3),
+    )
+}
+
+/// `in_pit_lane` is `mCurrentSector < 0 || mInPits != 0`. The sign-bit half is
+/// unproven against a live game (DEFERRED.md), so each half is pinned alone:
+/// whichever way the prove/drop decision goes, one of these has to change.
+#[test]
+fn in_pit_lane_is_the_or_of_the_sector_sign_bit_and_the_scoring_flag() {
+    let base = golden_snapshot();
+    assert!(!frame_of(&base).in_pit_lane);
+
+    let mut flag_only = golden_snapshot();
+    flag_only.vehicles[0].m_in_pits = 1;
+    assert!(flag_only.telem.m_current_sector >= 0);
+    assert!(frame_of(&flag_only).in_pit_lane);
+
+    let mut sign_only = golden_snapshot();
+    sign_only.telem.m_current_sector |= i32::MIN;
+    assert_eq!(sign_only.vehicles[0].m_in_pits, 0);
+    let frame = frame_of(&sign_only);
+    assert!(frame.in_pit_lane);
+    // The sign bit must not leak into the sector (golden is sector index 1).
+    assert_eq!(frame.sector, Some(2));
+
+    let mut both = sign_only;
+    both.vehicles[0].m_in_pits = 1;
+    assert!(frame_of(&both).in_pit_lane);
+}
+
 #[test]
 fn a_partly_unpopulated_tyre_reads_absent_not_negative() {
     let mut snap = golden_snapshot();
