@@ -5,8 +5,8 @@
 //! us, so a future refactor can't quietly reintroduce the old wrong reading.
 
 use pf_core::lmu::types::{
-    has_virtual_energy, PitstopEstimate, PitstopEstimateTimes, RepairAndRefuel, SessionInfo,
-    Standings, StrategyUsage,
+    has_virtual_energy, FuelInfo, PitstopEstimate, PitstopEstimateTimes, RepairAndRefuel,
+    SessionInfo, Standings, StrategyUsage,
 };
 
 #[test]
@@ -397,4 +397,30 @@ fn virtual_energy_counters_only_mean_anything_as_a_ratio() {
         Some(f) => assert!((0.0..=1.0).contains(&f), "{f} is not a fraction"),
         None => assert!(rr.fuel_info.max_virtual_energy.unwrap_or(0.0) == 0.0),
     }
+}
+
+#[test]
+fn ve_fraction_is_current_over_max_and_declines_without_a_denominator() {
+    let ve = |current, max| FuelInfo {
+        current_virtual_energy: current,
+        max_virtual_energy: max,
+        ..Default::default()
+    };
+
+    // Raw counters at the magnitudes the audit saw (~5.2e8 of ~7.1e8).
+    let f = ve(Some(5.2e8), Some(7.1e8)).ve_fraction().unwrap();
+    assert!((f - 5.2 / 7.1).abs() < 1e-12, "got {f}");
+
+    assert_eq!(ve(Some(5.2e8), Some(0.0)).ve_fraction(), None, "max 0");
+    assert_eq!(ve(None, Some(7.1e8)).ve_fraction(), None, "current absent");
+}
+
+#[test]
+fn virtual_energy_keys_are_camel_case() {
+    let fi: FuelInfo =
+        serde_json::from_str(r#"{"currentVirtualEnergy": 5.2e8, "maxVirtualEnergy": 7.1e8}"#)
+            .unwrap();
+    assert_eq!(fi.current_virtual_energy, Some(5.2e8));
+    assert_eq!(fi.max_virtual_energy, Some(7.1e8));
+    assert!(fi.ve_fraction().is_some());
 }
