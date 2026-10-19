@@ -274,17 +274,6 @@ fn a_partly_unpopulated_tyre_reads_absent_not_negative() {
     assert!((frame.tyre_temp_c[1].unwrap() - (361.0 - 273.15)).abs() < 1e-9);
 }
 
-fn frame_of(snap: &Snapshot) -> pf_core::lmu::Frame {
-    build_frame(
-        1,
-        Duration::ZERO,
-        snap,
-        Arc::new(RestSnapshot::default()),
-        None,
-        Duration::from_secs(3),
-    )
-}
-
 #[test]
 fn a_flat_zero_kelvin_wheel_reads_absent_for_tyre_and_brake() {
     let mut snap = golden_snapshot();
