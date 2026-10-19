@@ -1,0 +1,235 @@
+# Weekly staging build. Merges every open, non-draft PR that targets staging
+# into staging in one pass, so a pile of small PRs (the dependency sweeps
+# especially) lands together instead of one at a time.
+#
+# For each PR, oldest first:
+#   1. Merge it with --no-ff. GitHub marks the PR as merged when its head
+#      commit reaches staging, so the PRs close themselves on push.
+#   2. If the only conflict is Cargo.lock, redo that PR's crate bumps on top of
+#      the lockfile built so far instead of skipping it. The sweep PRs are
+#      lockfile-heavy and overlap on shared transitive crates.
+#   3. Run the fast check (fmt, clippy, tests, tsc). If it fails, undo the
+#      merge and move on. Installers are not built here, ci.yml does that.
+#
+# Nothing is pushed until every PR has been tried. The push is a plain
+# fast-forward, so a staging that moved mid-run fails the push rather than
+# being overwritten.
+#
+# Skipped on purpose: drafts (the opt-out), PRs from forks, and PRs that touch
+# .github/workflows (GITHUB_TOKEN is not allowed to push workflow changes).
+#
+# Manual runs default to a dry run: everything except the push.
+name: Weekly staging build
+
+on:
+  schedule:
+    # Mondays 06:37 UTC, after the weekend's dependency PRs have piled up.
+    - cron: "37 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Merge and check, but do not push to staging
+        type: boolean
+        default: true
+
+concurrency:
+  group: weekly-staging-build
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+  actions: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: staging
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      # Same libraries the linux job in ci.yml installs, minus patchelf, which
+      # only the bundler needs.
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libdbus-1-dev gnome-keyring
+
+      - name: Merge open PRs
+        id: merge
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          rows="$RUNNER_TEMP/rows.md"
+          : > "$rows"
+          start=$(git rev-parse HEAD)
+          merged=0
+          skipped=0
+          installed=""
+
+          row() { printf '| #%s | %s | %s |\n' "$1" "$2" "${3:-}" >> "$rows"; }
+          skip() {
+            row "$1" "skipped" "$2"
+            echo "::warning::PR #$1 skipped: $2"
+            skipped=$((skipped + 1))
+          }
+
+          # pnpm install only when the dependency files differ from what is installed.
+          install() {
+            local state
+            state=$(cat package.json apps/pf_desk/package.json pnpm-workspace.yaml pnpm-lock.yaml | sha256sum)
+            if [ "$state" != "$installed" ]; then
+              installed=""
+              pnpm install --frozen-lockfile
+              installed=$state
+            fi
+          }
+
+          # The fast check, the same commands ci.yml runs minus the installer
+          # build, plus a type check of the UI. The keychain tests need a
+          # Secret Service, so they run under a throwaway gnome-keyring.
+          check() {
+            install &&
+              cargo fmt --all --check &&
+              cargo clippy --workspace --all-targets --locked -- -D warnings &&
+              dbus-run-session -- bash -c 'echo -n ci | gnome-keyring-daemon --components=secrets --daemonize --unlock && cargo test --workspace --locked' &&
+              pnpm --filter pf_desk exec tsc --noEmit
+          }
+
+          # "name version" for every registry crate in a lockfile. The source
+          # line comes after the version line, which leaves out the two
+          # workspace crates (they have no source).
+          locked() {
+            git show "$1:Cargo.lock" \
+              | awk '/^name = /{n=$3} /^version = /{v=$3} /^source = /{print n, v}' \
+              | tr -d '"' | sort -u
+          }
+
+          # Redo a PR's crate bumps on top of the lockfile built so far. Called
+          # mid-merge, so HEAD is still the pre-merge commit and Cargo.toml is
+          # already merged. A crate counts as bumped when the PR head locks a
+          # version of it that the merge base did not. A crate cargo cannot pick
+          # by name alone (several versions locked) fails the resolve, and the
+          # PR is skipped as a conflict.
+          resolve_lockfile() {
+            local head=$1 base list name
+            base=$(git merge-base HEAD "$head")
+            list=$(comm -13 <(locked "$base") <(locked "$head") | cut -d' ' -f1 | sort -u)
+            [ -n "$list" ] || return 1
+            git checkout --ours -- Cargo.lock || return 1
+            # Adds any crate the merged Cargo.toml needs that ours lacks.
+            cargo metadata --format-version 1 > /dev/null || return 1
+            for name in $list; do
+              # A crate the merged manifests no longer pull in has nothing to bump.
+              grep -q "^name = \"${name}\"$" Cargo.lock || continue
+              cargo update --quiet -p "$name" || return 1
+            done
+          }
+
+          echo "::group::Baseline"
+          if ! check; then
+            echo "::error::staging already fails the fast check, so no PR can be judged against it. Fix staging first."
+            exit 1
+          fi
+          echo "::endgroup::"
+
+          prs=$(gh pr list --base staging --state open --limit 200 \
+            --json number,headRefName,isDraft,isCrossRepository \
+            --jq 'map(select(.isDraft == false and .isCrossRepository == false)) | sort_by(.number)[] | [.number, .headRefName] | @tsv')
+
+          # fd 3 keeps cargo and git from swallowing the list on stdin.
+          while IFS=$'\t' read -r -u 3 num branch; do
+            [ -n "$num" ] || continue
+            echo "::group::PR #${num} (${branch})"
+            before=$(git rev-parse HEAD)
+            git fetch --quiet origin "pull/${num}/head"
+            head=$(git rev-parse FETCH_HEAD)
+            msg="Merge pull request #${num} from ${GITHUB_REPOSITORY_OWNER}/${branch}"
+            status="merged"
+
+            if ! git merge --no-ff -m "$msg" "$head" > /dev/null 2>&1; then
+              conflicts=$(git diff --name-only --diff-filter=U | paste -sd, -)
+              if [ "$conflicts" = "Cargo.lock" ] && resolve_lockfile "$head"; then
+                git add Cargo.lock
+                git commit --no-edit --quiet
+                status="merged, lockfile regenerated"
+              else
+                git merge --abort 2> /dev/null || git reset --hard --quiet "$before"
+                skip "$num" "merge conflict (${conflicts:-unknown})"
+                echo "::endgroup::"
+                continue
+              fi
+            fi
+
+            if [ "$(git rev-parse HEAD)" = "$before" ]; then
+              row "$num" "already in staging"
+              echo "::endgroup::"
+              continue
+            fi
+
+            if ! git diff --quiet "$before" HEAD -- .github/workflows; then
+              git reset --hard --quiet "$before"
+              skip "$num" "touches .github/workflows, merge it by hand"
+              echo "::endgroup::"
+              continue
+            fi
+
+            if ! check > "$RUNNER_TEMP/check.log" 2>&1; then
+              tail -n 40 "$RUNNER_TEMP/check.log"
+              git reset --hard --quiet "$before"
+              skip "$num" "fast check failed"
+              echo "::endgroup::"
+              continue
+            fi
+
+            merged=$((merged + 1))
+            row "$num" "$status"
+            echo "::endgroup::"
+          done 3<<< "$prs"
+
+          {
+            echo "### Weekly staging build"
+            echo
+            if [ -s "$rows" ]; then
+              echo "| PR | Result | Detail |"
+              echo "|---|---|---|"
+              cat "$rows"
+            else
+              echo "No open PRs target staging."
+            fi
+            echo
+            echo "Merged ${merged}, skipped ${skipped}. staging ${start:0:7} to $(git rev-parse --short HEAD)."
+            if [ "${DRY_RUN:-}" = true ]; then
+              echo
+              echo "Dry run: nothing was pushed."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "merged=${merged}" >> "$GITHUB_OUTPUT"
+
+      # Pushes made with GITHUB_TOKEN do not trigger other workflows. Nothing
+      # here listens to staging pushes (ci.yml runs on main and on PRs), so
+      # there is nothing to dispatch by hand.
+      - name: Push to staging
+        if: steps.merge.outputs.merged != '0' && inputs.dry_run != true
+        run: git push origin HEAD:staging

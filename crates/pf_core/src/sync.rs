@@ -44,6 +44,12 @@ const PUSH_BACKOFF: Duration = Duration::from_secs(60);
 /// file every cycle. One JSON line is ~600 bytes.
 const MIN_SESSION_BYTES: u64 = 4096;
 
+/// How many `.rejected` recordings to keep. They are only kept so a driver
+/// can dig one out by hand; older ones are deleted so a season of over-size
+/// or malformed recordings can't grow the sessions folder without bound.
+/// Engineering default, not a product decision — Finn to review.
+const MAX_REJECTED: usize = 20;
+
 /// The session being recorded right now.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -349,6 +355,7 @@ fn push_pending() -> bool {
                 log::warn!("sync: {} permanently rejected, skipping: {e}", s.file);
                 let from = dir.join(&s.file);
                 let _ = std::fs::rename(&from, from.with_extension("jsonl.rejected"));
+                prune_rejected(&dir, MAX_REJECTED);
                 *lock(&LAST) = Some(LastPush {
                     file: s.file,
                     at_unix: now_unix(),
@@ -371,6 +378,30 @@ fn push_pending() -> bool {
         }
     }
     true
+}
+
+/// Delete the oldest `.rejected` files in `dir` beyond the newest `max`
+/// (by modified time, name as tie-break). Anything else is left alone.
+fn prune_rejected(dir: &std::path::Path, max: usize) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut rejected: Vec<_> = rd
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "rejected"))
+        .map(|e| {
+            let at = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(UNIX_EPOCH);
+            (at, e.path())
+        })
+        .collect();
+    rejected.sort();
+    let excess = rejected.len().saturating_sub(max);
+    for (_, path) in rejected.into_iter().take(excess) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// One upload. Private: the site has no public telemetry feed yet.
@@ -407,5 +438,42 @@ mod tests {
         let b = Blocked::from_start_error(&Error::LmuPluginsDisabled).unwrap();
         assert_eq!(b.kind, "lmu_plugins_disabled");
         assert!(b.message.contains("Enable Plugins"));
+    }
+
+    #[test]
+    fn prune_rejected_keeps_newest_and_only_touches_rejected() {
+        let dir = std::env::temp_dir().join(format!("pf-sync-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let make = |name: &str, age: u64| {
+            let f = std::fs::File::create(dir.join(name)).unwrap();
+            f.set_modified(UNIX_EPOCH + Duration::from_secs(1_000_000 - age))
+                .unwrap();
+        };
+        for i in 0..5 {
+            make(&format!("r{i}.jsonl.rejected"), 100 - i); // r4 newest
+        }
+        make("live.jsonl", 500);
+        make("notes.txt", 500);
+
+        prune_rejected(&dir, 10); // under the cap: nothing goes
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 7);
+
+        prune_rejected(&dir, 2);
+        let mut left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "live.jsonl",
+                "notes.txt",
+                "r3.jsonl.rejected",
+                "r4.jsonl.rejected"
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
