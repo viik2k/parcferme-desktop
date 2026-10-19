@@ -432,6 +432,8 @@ pub async fn upload_setup(
             notes.as_deref().map(str::trim).filter(|n| !n.is_empty()),
             private.unwrap_or(false),
             export_path.as_deref(),
+            None,
+            None,
         )?;
         Ok(UploadedSetupDto {
             id: outcome.result.id,

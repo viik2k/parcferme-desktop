@@ -268,6 +268,11 @@ pub struct UploadMeta<'a> {
     pub notes: Option<&'a str>,
     /// Owner-only on the site. False matches the web form's default.
     pub private: bool,
+    /// Push the file as a new version of this setup (§7c). The server then
+    /// ignores car, track, name, types, notes and private.
+    pub setup: Option<&'a str>,
+    /// `startedUnix` of the recording running when the file was saved (§7c).
+    pub session: Option<u64>,
 }
 
 /// Successful upload: the new setup's public UUID and its page URL.
@@ -277,6 +282,12 @@ pub struct UploadResult {
     /// Absolute `https://…/setups/<id>` URL, synthesized from the client's
     /// origin if the server omits or relativizes it.
     pub url: String,
+    /// The version the file is on the site (§7c); `None` from older servers.
+    pub version: Option<u32>,
+    /// The server already had these bytes and created nothing (§7c).
+    pub duplicate: bool,
+    /// A `setup=` push identical to the active version: a no-op (§7c).
+    pub unchanged: bool,
 }
 
 /// Wire shape of the upload response — `url` optional so a minimal server
@@ -286,6 +297,12 @@ struct UploadResultWire {
     id: String,
     #[serde(default)]
     url: Option<String>,
+    #[serde(default)]
+    version: Option<u32>,
+    #[serde(default)]
+    duplicate: bool,
+    #[serde(default)]
+    unchanged: bool,
 }
 
 /// Outcome of one poll of the device-token endpoint.
@@ -482,6 +499,12 @@ impl ApiClient {
         if meta.private {
             req = req.query("private", "true");
         }
+        if let Some(setup) = meta.setup {
+            req = req.query("setup", setup);
+        }
+        if let Some(session) = meta.session {
+            req = req.query("session", session.to_string());
+        }
         match checked(req.send(bytes)) {
             Ok(resp) => {
                 let wire: UploadResultWire = read_json(resp)?;
@@ -489,9 +512,18 @@ impl ApiClient {
                     Some(url) => self.absolutize(url),
                     None => format!("{}/setups/{}", self.base_url, wire.id),
                 };
-                Ok(UploadResult { id: wire.id, url })
+                Ok(UploadResult {
+                    id: wire.id,
+                    url,
+                    version: wire.version,
+                    duplicate: wire.duplicate,
+                    unchanged: wire.unchanged,
+                })
             }
             Err(Failure::Status(401, _)) => Err(Error::DeviceRevoked),
+            // Only a `setup=` push names an existing setup, so a 404 here means
+            // that setup was deleted on the site.
+            Err(Failure::Status(404, _)) => Err(Error::SetupNotFound),
             Err(Failure::Status(403, _)) => Err(Error::Api(
                 "the server refused this upload — your account may not be allowed to publish setups"
                     .to_string(),
@@ -569,7 +601,13 @@ impl ApiClient {
                     Some(url) => self.absolutize(url),
                     None => format!("{}/telemetry/{}", self.base_url, wire.id),
                 };
-                Ok(UploadResult { id: wire.id, url })
+                Ok(UploadResult {
+                    id: wire.id,
+                    url,
+                    version: None,
+                    duplicate: false,
+                    unchanged: false,
+                })
             }
             Err(Failure::Status(401, _)) => Err(Error::DeviceRevoked),
             Err(Failure::Status(code, resp)) => Err(api_error("share", code, *resp)),
