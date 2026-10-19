@@ -119,10 +119,12 @@ impl Client {
     }
 
     pub fn with_base(base: impl Into<String>) -> Self {
-        let agent = ureq::AgentBuilder::new()
-            .timeout(REQUEST_TIMEOUT)
+        let agent = ureq::Agent::config_builder()
+            .timeout_global(Some(REQUEST_TIMEOUT))
             .user_agent(concat!("pf-desktop/", env!("CARGO_PKG_VERSION")))
-            .build();
+            .http_status_as_error(false)
+            .build()
+            .into();
         Client {
             agent,
             base: base.into(),
@@ -135,9 +137,9 @@ impl Client {
     /// Fetch an endpoint into the reusable buffer and return it as a slice.
     fn get_raw(&mut self, endpoint: &str) -> Result<&[u8]> {
         let url = format!("{}{endpoint}", self.base);
-        let resp = match self.agent.get(&url).call() {
+        let resp = match crate::api::checked(self.agent.get(&url).call()) {
             Ok(resp) => resp,
-            Err(ureq::Error::Status(code, _)) => {
+            Err(crate::api::Failure::Status(code, _)) => {
                 return Err(Error::Api(format!(
                     "LMU returned HTTP {code} for {endpoint}"
                 )))
@@ -146,10 +148,11 @@ impl Client {
             // there. Liveness is decided by the shared-memory side, so this is
             // reported as a plain poll error rather than a second opinion on
             // whether the game is up.
-            Err(e) => return Err(Error::Http(e.to_string())),
+            Err(crate::api::Failure::Transport(e)) => return Err(Error::Http(e.to_string())),
         };
         self.buf.clear();
-        resp.into_reader()
+        resp.into_body()
+            .into_reader()
             .take(4 * 1024 * 1024)
             .read_to_end(&mut self.buf)
             .map_err(Error::Io)?;

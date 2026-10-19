@@ -14,7 +14,7 @@ thiserror = { workspace = true }
 log = { workspace = true }
 # Blocking HTTP with rustls — no async runtime, keeps pf_core UI/runtime-agnostic
 # and avoids OpenSSL (a Windows packaging win).
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "3", features = ["json"] }
 # gzip for telemetry uploads (SERVER_CONTRACT §10) — a session is ~10:1.
 flate2 = "1"
 # OS keychain: Windows Credential Manager, or the Secret Service (GNOME

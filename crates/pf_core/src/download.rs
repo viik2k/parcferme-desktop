@@ -168,11 +168,18 @@ pub fn download_into(
 ) -> Result<(PathBuf, InstallAction)> {
     // Not ureq's global agent: it sets no read timeout, so a connection that
     // stalls mid-body would park this worker for the life of the process (#35).
-    let resp = crate::api::transfer_agent()
-        .get(url)
-        .call()
-        .map_err(|e| Error::Http(e.to_string()))?;
-    write_atomic(&mut resp.into_reader(), dest_dir, filename, policy)
+    let resp = crate::api::checked(crate::api::transfer_agent().get(url).call()).map_err(|f| {
+        Error::Http(match f {
+            crate::api::Failure::Status(code, _) => format!("status code {code}"),
+            crate::api::Failure::Transport(e) => e.to_string(),
+        })
+    })?;
+    write_atomic(
+        &mut resp.into_body().into_reader(),
+        dest_dir,
+        filename,
+        policy,
+    )
 }
 
 /// Stream `reader` into `dest_dir/<sanitized filename>` atomically: write to a
