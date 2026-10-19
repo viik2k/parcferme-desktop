@@ -40,7 +40,7 @@ use crate::{paths, sync, upload, Error, Result};
 
 /// How often to sweep the setups folders. A save shows up on the site within
 /// two of these (one to see it, one to see it has settled).
-const POLL: Duration = Duration::from_secs(5);
+const POLL: Duration = Duration::from_secs(10);
 
 /// How long to leave the folders alone after a cycle failed offline or signed out.
 const BACKOFF: Duration = Duration::from_secs(60);
@@ -150,6 +150,19 @@ fn fingerprint(bytes: &[u8]) -> u64 {
     })
 }
 
+/// The state file's key for `path`. Windows paths are case-insensitive and
+/// reach us from different places (the file picker for a manual upload, the
+/// detected setups root for a sweep), so the key is lowercased with one kind of
+/// separator, or a manual upload would never be matched to its later saves.
+/// The real path is still what gets read and uploaded.
+fn key(path: &Path) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(path.to_string_lossy().replace('/', "\\").to_lowercase())
+    } else {
+        path.to_path_buf()
+    }
+}
+
 fn state_path() -> Result<PathBuf> {
     Ok(crate::settings::default_path()?.with_file_name("setup-sync.json"))
 }
@@ -204,7 +217,7 @@ pub(crate) fn note_installed(path: &Path) {
     };
     with_state(|s| {
         s.files.insert(
-            path.to_path_buf(),
+            key(path),
             Entry {
                 stamp: Stamp::of(&meta),
                 hash: fingerprint(&bytes),
@@ -221,7 +234,7 @@ pub(crate) fn note_installed(path: &Path) {
 pub(crate) fn note_uploaded(path: &Path, meta: &std::fs::Metadata, bytes: &[u8], setup_id: &str) {
     with_state(|s| {
         s.files.insert(
-            path.to_path_buf(),
+            key(path),
             Entry {
                 stamp: Stamp::of(meta),
                 hash: fingerprint(bytes),
@@ -312,13 +325,14 @@ fn plan(
     scanned: &HashMap<PathBuf, (Sim, Stamp)>,
     settling: &mut HashMap<PathBuf, Stamp>,
 ) -> Vec<(PathBuf, Sim)> {
-    state.files.retain(|p, _| scanned.contains_key(p));
+    let keys: std::collections::HashSet<PathBuf> = scanned.keys().map(|p| key(p)).collect();
+    state.files.retain(|k, _| keys.contains(k));
     settling.retain(|p, _| scanned.contains_key(p));
 
     if !state.seeded {
         for (path, &(_, stamp)) in scanned {
             if let Ok(bytes) = std::fs::read(path) {
-                let e = state.files.entry(path.clone()).or_default();
+                let e = state.files.entry(key(path)).or_default();
                 e.stamp = stamp;
                 e.hash = fingerprint(&bytes);
             }
@@ -334,7 +348,8 @@ fn plan(
 
     let mut push = Vec::new();
     for (path, &(sim, stamp)) in scanned {
-        let known = state.files.get(path);
+        let k = key(path);
+        let known = state.files.get(&k);
         if known.is_some_and(|e| e.stamp == stamp) {
             settling.remove(path);
             continue;
@@ -349,7 +364,7 @@ fn plan(
         let hash = fingerprint(&bytes);
         if known.is_some_and(|e| e.hash == hash) {
             // Touched, not changed (or a foreign file re-saved as-is).
-            if let Some(e) = state.files.get_mut(path) {
+            if let Some(e) = state.files.get_mut(&k) {
                 e.stamp = stamp;
             }
             continue;
@@ -391,7 +406,7 @@ fn skip(path: &Path, scanned: &HashMap<PathBuf, (Sim, Stamp)>) {
         return;
     };
     with_state(|s| {
-        let e = s.files.entry(path.to_path_buf()).or_default();
+        let e = s.files.entry(key(path)).or_default();
         e.stamp = stamp;
         e.hash = fingerprint(&bytes);
     });
@@ -401,7 +416,7 @@ fn skip(path: &Path, scanned: &HashMap<PathBuf, (Sim, Stamp)>) {
 /// private setup. A successful upload updates the state itself
 /// ([`note_uploaded`]).
 fn push(path: &Path, sim: Sim, settings: &Settings) -> Result<()> {
-    let known = with_state(|s| s.files.get(path).cloned()).flatten();
+    let known = with_state(|s| s.files.get(&key(path)).cloned()).flatten();
     // A recording of this game running right now: link the setup to it (§7c).
     let live = if sim == Sim::Lmu { sync::live() } else { None };
     let session = live.as_ref().map(|l| l.started_unix);
@@ -570,6 +585,17 @@ mod tests {
         assert!(!state.files.contains_key(&a));
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A manual upload (file picker path) and a sweep (detected root) must land
+    /// on the same entry on Windows.
+    #[cfg(windows)]
+    #[test]
+    fn keys_ignore_case_and_separators() {
+        assert_eq!(
+            key(Path::new("c:/program files (x86)/Steam/Fuji/Q.svm")),
+            key(Path::new(r"C:\Program Files (x86)\steam\fuji\q.SVM"))
+        );
     }
 
     /// The state file is persisted, so its hash must not change between builds.
