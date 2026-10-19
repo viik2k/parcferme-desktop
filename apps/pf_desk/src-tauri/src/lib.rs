@@ -153,6 +153,7 @@ fn handle_equip(app: &tauri::AppHandle, url: String) {
     }
     // Never log the URL itself — its `token` param, if present, is a secret.
     log::info!("equip deep link received");
+    pf_core::team_sync::poke(); // they're picking setups: a team one may be next
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let outcome = tauri::async_runtime::spawn_blocking(move || commands::run_equip(&url))
@@ -322,11 +323,15 @@ pub fn run() {
         })
         // Closing the window hides to tray instead of quitting — this is a
         // background tray utility that runs alongside iRacing.
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 let _ = window.hide();
                 api.prevent_close();
             }
+            // The user is at the app: check the team vault now, and stop
+            // the idle back-off (team_sync's poll interval).
+            WindowEvent::Focused(true) => pf_core::team_sync::poke(),
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
