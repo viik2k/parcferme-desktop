@@ -553,8 +553,8 @@ mod tests {
         assert_eq!(out, vec![(a.clone(), Sim::IRacing)]);
 
         // Same bytes rewritten (new size forces a new stamp): no push.
-        state.files.get_mut(&a).unwrap().hash = fingerprint(b"two!");
-        state.files.get_mut(&a).unwrap().stamp.size = 0;
+        state.files.get_mut(&key(&a)).unwrap().hash = fingerprint(b"two!");
+        state.files.get_mut(&key(&a)).unwrap().stamp.size = 0;
         assert!(plan(&mut state, &sweep(&dir), &mut settling).is_empty());
         assert!(plan(&mut state, &sweep(&dir), &mut settling).is_empty());
 
@@ -562,7 +562,7 @@ mod tests {
         let b = car.join("b.sto");
         std::fs::write(&b, b"theirs").unwrap();
         state.files.insert(
-            b.clone(),
+            key(&b),
             Entry {
                 stamp: Stamp::of(&std::fs::metadata(&b).unwrap()),
                 hash: fingerprint(b"theirs"),
@@ -582,7 +582,7 @@ mod tests {
 
         std::fs::remove_file(&a).unwrap();
         plan(&mut state, &sweep(&dir), &mut settling);
-        assert!(!state.files.contains_key(&a));
+        assert!(!state.files.contains_key(&key(&a)));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
