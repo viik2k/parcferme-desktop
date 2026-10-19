@@ -18,7 +18,6 @@ ureq = { version = "3", features = ["json"] }
 # gzip for telemetry uploads (SERVER_CONTRACT §10) — a session is ~10:1.
 flate2 = "1"
 # OS keychain: Windows Credential Manager, or the Secret Service (GNOME
-# Keyring / KWallet) on Linux. Each backend is target-gated inside keyring, so
-# both features are safe everywhere. Without a Linux backend keyring silently
-# falls back to an in-memory mock and sign-in never persists.
-keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust"] }
+# Keyring / KWallet) on Linux. keyring 4's default `v1` feature wires up the
+# native stores (target-gated) behind the same Entry API as keyring 3.
+keyring = "4"
