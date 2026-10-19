@@ -45,6 +45,7 @@ crates/pf_core/src/
 ├── deeplink.rs   # parse parcferme:// URL schemes
 ├── session.rs    # telemetry sessions: record to JSON-Lines, summarize, gzip + share (§10)
 ├── sync.rs       # Sync Engine: daemon thread — record every LMU session, push it, delete it
+├── setup_sync.rs # Setup auto-sync: poll the setups folders, push settled changes private, re-saves as versions (§7c)
 ├── settings.rs   # persisted settings: per-sim folder overrides + conflict policy
 ├── sim.rs        # supported sims: folder roots + per-sim layout (`Sim::layout` — iRacing `<car>`, ACC `<car>\<track>`, LMU `<track>`)
 ├── lmu.rs        # Le Mans Ultimate live source: merges shared memory + REST into one Frame stream

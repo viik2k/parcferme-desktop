@@ -78,6 +78,34 @@ fn team_sync_toasts(app: &tauri::AppHandle) {
     }
 }
 
+/// One toast per setup the setup auto-sync engine pushed (or couldn't): it
+/// uploads the user's files unattended, so each one is announced. Same polled
+/// shape as [`team_sync_toasts`].
+fn setup_sync_toasts(app: &tauri::AppHandle) {
+    use std::collections::HashSet;
+    let mut toasted: HashSet<(String, u64)> = HashSet::new();
+    loop {
+        for p in pf_core::setup_sync::status().recent {
+            if toasted.insert((p.file.clone(), p.at_unix)) {
+                let _ = match (&p.error, p.version) {
+                    (Some(e), _) => notify(app, "Setup not synced", &format!("{}: {e}", p.file)),
+                    (None, Some(v)) if v > 1 => notify(
+                        app,
+                        "Setup synced",
+                        &format!("{} \u{b7} version {v}", p.file),
+                    ),
+                    (None, _) => notify(
+                        app,
+                        "Setup synced",
+                        &format!("{} \u{b7} new private setup", p.file),
+                    ),
+                };
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+}
+
 /// Toast once when the sync engine finds the game running but unrecordable
 /// (plugins disabled, #36).
 ///
@@ -292,6 +320,19 @@ pub fn run() {
             // user has turned it on in Settings. Same no-shutdown reasoning —
             // an install is a single atomic write, never left half-done.
             pf_core::team_sync::spawn();
+            // Setup auto-sync: pushes setups saved in the sims folders, when
+            // the user has turned it on. An upload is one request; a kill
+            // mid-way just means the next launch sees the change again.
+            pf_core::setup_sync::spawn();
+            {
+                let toast_handle = app.handle().clone();
+                if let Err(e) = std::thread::Builder::new()
+                    .name("pf-setup-sync-toasts".into())
+                    .spawn(move || setup_sync_toasts(&toast_handle))
+                {
+                    log::error!("setup sync toast thread didn't start: {e}");
+                }
+            }
             {
                 let toast_handle = app.handle().clone();
                 if let Err(e) = std::thread::Builder::new()
@@ -346,6 +387,7 @@ pub fn run() {
             commands::setup_options,
             commands::upload_setup,
             commands::sync_status,
+            commands::setup_sync_status,
             commands::open_sessions_dir,
         ])
         .run(tauri::generate_context!())

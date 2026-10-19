@@ -13,6 +13,8 @@ export interface Settings {
   syncEnabled: boolean;
   /** Install new team-vault setups automatically. */
   teamAutoInstallEnabled: boolean;
+  /** Push setups saved in the sims folders automatically (private). */
+  setupSyncEnabled: boolean;
 }
 
 

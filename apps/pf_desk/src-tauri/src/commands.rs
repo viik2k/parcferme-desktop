@@ -489,6 +489,12 @@ pub async fn sync_status() -> Result<pf_core::sync::Status, CmdError> {
     blocking(|| Ok(sync::status())).await
 }
 
+/// What setup auto-sync has pushed this run, and whether it's on.
+#[tauri::command]
+pub async fn setup_sync_status() -> Result<pf_core::setup_sync::Status, CmdError> {
+    blocking(|| Ok(pf_core::setup_sync::status())).await
+}
+
 /// Reveal the sessions folder — the "where did my recordings go" answer, and
 /// the escape hatch when a push keeps failing.
 #[tauri::command]
