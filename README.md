@@ -2,33 +2,45 @@
 
 A lightweight Windows **tray client** that turns clicking **Equip** on
 [parcferme.cc](https://parcferme.cc) into a setup file landing in the user's
-iRacing folder. Built on **Tauri 2** (Rust core + web UI).
+iRacing, LMU or ACC folder. Built on **Tauri 2** (Rust core + web UI).
 
-> Status: **M4 — Hardening + UX polish.** Device auth (M1), multi-sim manual
-> pulls (M2), and the `parcferme://equip` deep link (M3) all work end to end;
-> M4 adds persisted Settings (per-sim folder overrides + conflict policy used
-> by *both* download paths), typed error states with recovery hints, the full
-> tray menu, native equip toasts, launch-at-startup, and structured file
-> logging. Server endpoints are specified in
-> [`docs/SERVER_CONTRACT.md`](docs/SERVER_CONTRACT.md); the web app's Equip
-> button emitting the deep link is the one remaining M3 piece.
+> Status: **shipped (v1.0.x).** Device auth (OAuth 2.0 device-authorization
+> grant), multi-sim manual pull/download (iRacing, ACC, LMU), setup upload, and
+> the `parcferme://equip` deep link all ship in v1.0. On top of that, v1.0
+> ships the **Sync Engine** (records every LMU telemetry session, pushes it, then
+> deletes it), **Team Auto-Install** (opt-in pull of new team-vault setups), and
+> a live **LMU telemetry source** (shared memory + REST merged
+> into one frame stream). The client also has persisted Settings (per-sim folder
+> overrides + conflict policy), typed error states with recovery hints, a full
+> tray menu, native equip toasts, launch-at-startup, and structured file logging.
+> Server endpoints are specified in
+> [`docs/SERVER_CONTRACT.md`](docs/SERVER_CONTRACT.md).
 
 ## Architecture
 
-All product logic lives in `pf_core`, a plain Rust library with no UI. The
-Tauri shell (`pf_desk`) only does windowing, the tray, and toasts. A future CLI
-or push-daemon becomes new functions in `pf_core`, not a new app.
+All product logic lives in `pf_core`, a plain Rust library with no UI, no async
+runtime, and no Tauri dependency. The Tauri shell (`pf_desk`) is a thin wrapper
+for windowing, the tray icon, and IPC.
 
 ```
 parcferme-desktop/
 ├── crates/
 │   └── pf_core/              ← the real product: Rust library, no UI
-│        ├── auth             (device-token grant, OS-keychain storage)   [M1]
-│        ├── api              (typed client for parcferme.cc endpoints)   [M2]
-│        ├── paths            (locate Documents\iRacing\setups\, …)       [M2]
-│        ├── download         (presigned fetch → atomic, conflict-aware write) [M2·M4]
-│        ├── deeplink         (parse parcferme://equip?… payloads)        [M3]
-│        └── settings         (persisted overrides + conflict policy)     [M4]
+│        ├── auth             (OAuth 2.0 device-authorization grant + OS-keychain storage)
+│        ├── api              (typed blocking client for parcferme.cc endpoints)
+│        ├── paths            (locate each sim's setups root)
+│        ├── sim              (supported sims: iRacing, ACC, LMU folder layouts)
+│        ├── download         (presigned-URL fetch → atomic, conflict-aware write)
+│        ├── upload           (identify a local setup + push to the site)
+│        ├── deeplink         (parse parcferme:// URL schemes)
+│        ├── session          (telemetry sessions: record, summarize, gzip + share)
+│        ├── sync             (Sync Engine: daemon — record every LMU session, push, delete)
+│        ├── team_sync        (Team Auto-Install: pull new team-vault setups, opt-in)
+│        ├── lmu              (Le Mans Ultimate live source: shared memory + REST)
+│        ├── car_aliases      (curated iRacing folder-id → site car-name map)
+│        ├── car_match        (match a folder id against the site's live car list)
+│        ├── options          (cached car/track name lists for upload pickers)
+│        └── settings         (persisted per-sim folder overrides + conflict policy)
 ├── apps/
 │   └── pf_desk/              ← Tauri shell: tray, window, settings, toasts
 │        ├── src/             (React + TS + Tailwind + Vite UI)
@@ -71,5 +83,7 @@ pnpm icon apps/pf_desk/src-tauri/app-icon.png
 
 ## Roadmap
 
-See `ParcFerme Desktop App — Build Plan` (M0 skeleton → M6 launch) and §8 for
-the post-v1 roadmap (Push, Auto-sync, Team Sync, in-app diff).
+The M0→M6 build plan is complete and v1.0 has shipped. In-flight work on
+`staging`: **auto-sync** (setups saved in-sim reach the site with no button
+press) and a team-sync polling backoff. Open design questions live in the GitHub
+issues (session-boundary recording, sync-queue retention, in-app diff).
