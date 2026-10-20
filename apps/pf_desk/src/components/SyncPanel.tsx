@@ -220,7 +220,8 @@ export function SyncPanel() {
             <span className="mt-0.5 block text-[10px] text-muted">
               A setup you save in the garage goes to your private library on
               its own; saving it again adds a version. Setups already in your
-              folders, and ones installed from the site, stay put.
+              folders, ones installed from the site, and ones other setup apps
+              install (Coach Dave, Garage 61) stay put.
             </span>
           </span>
           <input

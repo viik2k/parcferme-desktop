@@ -19,6 +19,10 @@
 //!   A manual upload from the Push tab counts as the first push too.
 //! - **No echo.** A file the app installed from the site (equip, team
 //!   auto-install) is marked foreign and skipped until the user changes it.
+//! - **Not other apps' setups.** Folders that setup apps install into
+//!   ([`VENDOR_DIRS`]) are never walked, and more than [`MAX_NEW_PER_CYCLE`]
+//!   new files settling at once is treated as an installer drop: marked
+//!   foreign, reported once on the Sync tab, not pushed.
 //! - **Skip and continue.** A file the site refuses (no car, no track, 422) is
 //!   reported and left alone until it changes again; it never blocks the rest.
 //!   Offline or signed out ends the cycle and waits, like [`crate::sync`].
@@ -55,6 +59,25 @@ const MAX_DEPTH: usize = 4;
 
 /// How many recent pushes [`status`] keeps. Not persisted.
 const HISTORY_LEN: usize = 20;
+
+/// Folders that setup apps (Coach Dave Delta, Garage 61's agent, ...) install
+/// their files into. Those are someone else's setups, often paid ones, so the
+/// engine never looks inside. Compared lowercase with only letters and digits
+/// kept, so "Garage 61" and "Garage61" both match. Add a name when a user
+/// reports another app's folder.
+const VENDOR_DIRS: &[&str] = &[
+    "coachdaveacademy",
+    "garage61",
+    "gofast",
+    "vrs",
+    "tracktitan",
+    "hymo",
+];
+
+/// More new files than this settling in one sweep is an installer drop, not
+/// garage saves (a save writes one file): they're recorded as someone else's
+/// and not pushed. Catches the apps [`VENDOR_DIRS`] doesn't name.
+const MAX_NEW_PER_CYCLE: usize = 2;
 
 /// When a file was last written and how big it was: the cheap change check.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -307,7 +330,7 @@ fn walk(dir: &Path, sim: Sim, depth: usize, found: &mut HashMap<PathBuf, (Sim, S
         let Ok(meta) = entry.metadata() else { continue };
         let name = entry.file_name().to_string_lossy().into_owned();
         if meta.is_dir() {
-            if depth < MAX_DEPTH {
+            if depth < MAX_DEPTH && !is_vendor_dir(&name) {
                 walk(&path, sim, depth + 1, found);
             }
         // Dot-files are our own `.name.part` downloads in flight.
@@ -317,14 +340,28 @@ fn walk(dir: &Path, sim: Sim, depth: usize, found: &mut HashMap<PathBuf, (Sim, S
     }
 }
 
+/// Files to push, and an installer drop held back: its size and sim.
+type Plan = (Vec<(PathBuf, Sim)>, Option<(usize, Sim)>);
+
+fn is_vendor_dir(name: &str) -> bool {
+    let norm: String = name
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    VENDOR_DIRS.contains(&norm.as_str())
+}
+
 /// Compare a sweep with the state: baseline when unseeded, otherwise return
-/// the settled files whose bytes changed, oldest first. Forgets files that
-/// are gone. Pure apart from reading the changed files' bytes.
+/// the settled files whose bytes changed, oldest first. An installer drop
+/// ([`MAX_NEW_PER_CYCLE`]) is recorded as foreign instead, and comes back as
+/// its size and sim. Forgets files that are gone. Pure apart from reading the
+/// changed files' bytes.
 fn plan(
     state: &mut State,
     scanned: &HashMap<PathBuf, (Sim, Stamp)>,
     settling: &mut HashMap<PathBuf, Stamp>,
-) -> Vec<(PathBuf, Sim)> {
+) -> Plan {
     let keys: std::collections::HashSet<PathBuf> = scanned.keys().map(|p| key(p)).collect();
     state.files.retain(|k, _| keys.contains(k));
     settling.retain(|p, _| scanned.contains_key(p));
@@ -343,10 +380,11 @@ fn plan(
             "setup sync: baseline of {} setup(s), none pushed",
             scanned.len()
         );
-        return Vec::new();
+        return (Vec::new(), None);
     }
 
     let mut push = Vec::new();
+    let mut new = Vec::new();
     for (path, &(sim, stamp)) in scanned {
         let k = key(path);
         let known = state.files.get(&k);
@@ -369,19 +407,56 @@ fn plan(
             }
             continue;
         }
+        if known.is_none() {
+            new.push((k, sim, stamp, hash));
+        }
         push.push((path.clone(), sim, stamp.mtime_ms));
     }
+    // ponytail: a drop the installer spreads over several sweeps gets past
+    // this; VENDOR_DIRS is the backstop for the apps we know.
+    let ignored = if new.len() > MAX_NEW_PER_CYCLE {
+        push.retain(|(p, _, _)| state.files.contains_key(&key(p)));
+        for (k, _, stamp, hash) in &new {
+            state.files.insert(
+                k.clone(),
+                Entry {
+                    stamp: *stamp,
+                    hash: *hash,
+                    setup: None,
+                    foreign: true,
+                },
+            );
+        }
+        log::info!("setup sync: {} new setups at once, not pushed", new.len());
+        Some((new.len(), new[0].1))
+    } else {
+        None
+    };
     push.sort_by_key(|&(_, _, mtime)| mtime);
-    push.into_iter().map(|(p, sim, _)| (p, sim)).collect()
+    (
+        push.into_iter().map(|(p, sim, _)| (p, sim)).collect(),
+        ignored,
+    )
 }
 
 /// One sweep and its pushes. False when it stopped on something that affects
 /// every file (offline, signed out), so the caller backs off.
 fn cycle(settings: &Settings, settling: &mut HashMap<PathBuf, Stamp>) -> bool {
     let scanned = scan(settings);
-    let Some(changed) = with_state(|s| plan(s, &scanned, settling)) else {
+    let Some((changed, ignored)) = with_state(|s| plan(s, &scanned, settling)) else {
         return true;
     };
+    if let Some((ignored, sim)) = ignored {
+        record(
+            Path::new(&format!("{ignored} setups")),
+            sim,
+            None,
+            Some(
+                "appeared together, so another app probably installed them. Not uploaded; edit one in the garage and it will be"
+                    .into(),
+            ),
+        );
+    }
     for (path, sim) in changed.into_iter().take(MAX_PUSHES_PER_CYCLE) {
         match push(&path, sim, settings) {
             Ok(()) => {}
@@ -540,23 +615,23 @@ mod tests {
         let mut settling = HashMap::new();
         let scanned = sweep(&dir);
         assert_eq!(scanned.len(), 1, "only real setup files: {scanned:?}");
-        assert!(plan(&mut state, &scanned, &mut settling).is_empty());
+        assert!(plan(&mut state, &scanned, &mut settling).0.is_empty());
         assert!(state.seeded);
 
         // Unchanged: nothing.
-        assert!(plan(&mut state, &sweep(&dir), &mut settling).is_empty());
+        assert!(plan(&mut state, &sweep(&dir), &mut settling).0.is_empty());
 
         // Changed: seen once, then pushed when it holds still.
         std::fs::write(&a, b"two!").unwrap();
-        assert!(plan(&mut state, &sweep(&dir), &mut settling).is_empty());
-        let out = plan(&mut state, &sweep(&dir), &mut settling);
+        assert!(plan(&mut state, &sweep(&dir), &mut settling).0.is_empty());
+        let out = plan(&mut state, &sweep(&dir), &mut settling).0;
         assert_eq!(out, vec![(a.clone(), Sim::IRacing)]);
 
         // Same bytes rewritten (new size forces a new stamp): no push.
         state.files.get_mut(&key(&a)).unwrap().hash = fingerprint(b"two!");
         state.files.get_mut(&key(&a)).unwrap().stamp.size = 0;
-        assert!(plan(&mut state, &sweep(&dir), &mut settling).is_empty());
-        assert!(plan(&mut state, &sweep(&dir), &mut settling).is_empty());
+        assert!(plan(&mut state, &sweep(&dir), &mut settling).0.is_empty());
+        assert!(plan(&mut state, &sweep(&dir), &mut settling).0.is_empty());
 
         // A foreign install with the bytes we recorded stays quiet...
         let b = car.join("b.sto");
@@ -570,19 +645,64 @@ mod tests {
                 foreign: true,
             },
         );
-        assert!(plan(&mut state, &sweep(&dir), &mut settling).is_empty());
-        assert!(plan(&mut state, &sweep(&dir), &mut settling).is_empty());
+        assert!(plan(&mut state, &sweep(&dir), &mut settling).0.is_empty());
+        assert!(plan(&mut state, &sweep(&dir), &mut settling).0.is_empty());
         // ...until the user edits it.
         std::fs::write(&b, b"theirs, tuned").unwrap();
         plan(&mut state, &sweep(&dir), &mut settling);
         assert_eq!(
-            plan(&mut state, &sweep(&dir), &mut settling),
+            plan(&mut state, &sweep(&dir), &mut settling).0,
             vec![(b.clone(), Sim::IRacing)]
         );
 
         std::fs::remove_file(&a).unwrap();
         plan(&mut state, &sweep(&dir), &mut settling);
         assert!(!state.files.contains_key(&key(&a)));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Another app's files are never pushed: not under a vendor folder, and not
+    /// when many new ones land at once. A single garage save still is.
+    #[test]
+    fn vendor_folders_and_installer_drops_stay_put() {
+        let dir = scratch("vendor");
+        let car = dir.join("mx5");
+        let delta = car.join("Coach Dave Academy").join("26S4");
+        std::fs::create_dir_all(&delta).unwrap();
+        std::fs::write(delta.join("x.sto"), b"paid").unwrap();
+        assert!(sweep(&dir).is_empty(), "vendor folder is not walked");
+        assert!(is_vendor_dir("Garage 61") && is_vendor_dir("GO-Fast"));
+        assert!(!is_vendor_dir("mx5"));
+
+        let mut state = State::default();
+        let mut settling = HashMap::new();
+        plan(&mut state, &sweep(&dir), &mut settling);
+        assert!(state.seeded);
+
+        // Five files at once: recorded as foreign, none pushed.
+        for i in 0..5 {
+            std::fs::write(car.join(format!("drop{i}.sto")), b"pack").unwrap();
+        }
+        assert_eq!(
+            plan(&mut state, &sweep(&dir), &mut settling),
+            (vec![], None)
+        );
+        assert_eq!(
+            plan(&mut state, &sweep(&dir), &mut settling),
+            (vec![], Some((5, Sim::IRacing)))
+        );
+        assert!(plan(&mut state, &sweep(&dir), &mut settling).0.is_empty());
+        assert!(state.files[&key(&car.join("drop0.sto"))].foreign);
+
+        // One garage save: pushed as usual.
+        let mine = car.join("mine.sto");
+        std::fs::write(&mine, b"mine").unwrap();
+        plan(&mut state, &sweep(&dir), &mut settling);
+        assert_eq!(
+            plan(&mut state, &sweep(&dir), &mut settling),
+            (vec![(mine, Sim::IRacing)], None)
+        );
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
