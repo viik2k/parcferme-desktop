@@ -83,7 +83,7 @@ pnpm icon apps/pf_desk/src-tauri/app-icon.png
 
 ## Roadmap
 
-The M0→M6 build plan is complete and v1.0 has shipped. In-flight work on
-`staging`: **auto-sync** (setups saved in-sim reach the site with no button
-press) and a team-sync polling backoff. Open design questions live in the GitHub
-issues (session-boundary recording, sync-queue retention, in-app diff).
+The M0→M6 build plan is complete and v1.0 has shipped. Open PRs add
+**auto-sync** (setups saved in-sim reach the site with no button press) and a
+team-sync polling backoff. Open design questions live in the GitHub issues
+(session-boundary recording, sync-queue retention, in-app diff).
