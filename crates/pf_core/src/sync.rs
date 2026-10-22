@@ -144,6 +144,11 @@ pub fn is_recording() -> bool {
     RECORDING.load(Ordering::Relaxed)
 }
 
+/// The session being recorded right now, if any. A mutex read.
+pub fn live() -> Option<Live> {
+    lock(&LIVE).clone()
+}
+
 /// Why the engine can't record right now, if it's something the driver must
 /// fix. A mutex read, cheap enough for the tray to poll.
 pub fn blocked() -> Option<Blocked> {

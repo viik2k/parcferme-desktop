@@ -328,7 +328,8 @@ human-readable message is worth returning.
 
 ## 7c. Auto-sync: version pushes, idempotency, session link (parc-ferme#131)
 
-**Status: server shipped, client not yet.** Everything here rides on §7's one
+**Status: server shipped; client shipped as `pf_core::setup_sync` (#32), off
+by default behind "Upload setups I save" on the Sync tab.** Everything here rides on §7's one
 route; nothing changes for a client that never sends the new params.
 
 ### Push a new version: `setup=<uuid>`

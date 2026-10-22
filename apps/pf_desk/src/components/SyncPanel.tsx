@@ -6,8 +6,10 @@ import {
   bytes,
   elapsed,
   openSessionsDir,
+  setupSyncStatus,
   syncStatus,
   when,
+  type SetupSyncStatus,
   type SyncStatus,
 } from "../lib/sync";
 
@@ -24,6 +26,7 @@ const POLL_MS = 3000;
  */
 export function SyncPanel() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [setups, setSetups] = useState<SetupSyncStatus | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Ticks the stint clock between polls, so the seconds count up smoothly.
@@ -34,6 +37,11 @@ export function SyncPanel() {
       setStatus(await syncStatus());
     } catch {
       setStatus(null);
+    }
+    try {
+      setSetups(await setupSyncStatus());
+    } catch {
+      setSetups(null);
     }
   }, []);
 
@@ -48,9 +56,9 @@ export function SyncPanel() {
     };
   }, [poll]);
 
-  async function toggle() {
+  async function toggle(key: "syncEnabled" | "setupSyncEnabled") {
     if (!settings) return;
-    const next = { ...settings, syncEnabled: !settings.syncEnabled };
+    const next = { ...settings, [key]: !settings[key] };
     setSettings(next);
     try {
       await saveSettings(next);
@@ -69,6 +77,8 @@ export function SyncPanel() {
   const queue = status?.pending ?? [];
   const last = status?.lastPush ?? null;
   const blocked = enabled ? (status?.blocked ?? null) : null;
+  const setupsOn = settings?.setupSyncEnabled ?? false;
+  const pushes = setups?.recent ?? [];
 
   return (
     <div className="divide-y divide-border">
@@ -84,7 +94,7 @@ export function SyncPanel() {
           type="checkbox"
           checked={enabled}
           disabled={!settings}
-          onChange={() => void toggle()}
+          onChange={() => void toggle("syncEnabled")}
           className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
         />
       </label>
@@ -201,6 +211,57 @@ export function SyncPanel() {
           )}
         </div>
       )}
+
+      {/* Setups: the garage half of auto-sync (#32). */}
+      <div className="py-3">
+        <label className="flex cursor-pointer items-start justify-between gap-3 text-xs">
+          <span className="text-foreground">
+            Upload setups I save
+            <span className="mt-0.5 block text-[10px] text-muted">
+              A setup you save in the garage goes to your private library on
+              its own; saving it again adds a version. Setups already in your
+              folders, ones installed from the site, and ones other setup apps
+              install (Coach Dave, Garage 61) stay put.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={setupsOn}
+            disabled={!settings}
+            onChange={() => void toggle("setupSyncEnabled")}
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
+          />
+        </label>
+        {setupsOn && pushes.length > 0 && (
+          <ul className="mt-2 divide-y divide-border/60">
+            {pushes.map((p) => (
+              <li
+                key={`${p.file}-${p.atUnix}`}
+                className="flex items-baseline justify-between gap-2 py-1 text-[10px]"
+              >
+                {p.url ? (
+                  <button
+                    onClick={() => void openUrl(p.url as string).catch(() => undefined)}
+                    className="truncate text-left text-foreground underline-offset-2 hover:underline"
+                    title="View on parcferme.cc"
+                  >
+                    {p.file}
+                  </button>
+                ) : (
+                  <span className="truncate text-destructive" title={p.error ?? ""}>
+                    {p.file} — {p.error}
+                  </span>
+                )}
+                <span className="shrink-0 font-mono text-muted">
+                  {p.error
+                    ? when(p.atUnix)
+                    : `${p.version && p.version > 1 ? `v${p.version}` : "new"} · ${when(p.atUnix)}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {error && (
         <p className="mt-3 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive ring-1 ring-destructive/30">

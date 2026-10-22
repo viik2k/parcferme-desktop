@@ -50,6 +50,28 @@ export interface SyncStatus {
 
 export const syncStatus = () => invoke<SyncStatus>("sync_status");
 
+/** One setup auto-sync push — mirrors `pf_core::setup_sync::Pushed`. */
+export interface SetupPush {
+  file: string;
+  sim: string;
+  atUnix: number;
+  url: string | null;
+  /** 1 for a new setup, higher for a re-save. */
+  version: number | null;
+  /** Refused: left alone until the file changes again. */
+  error: string | null;
+}
+
+/** Mirrors `pf_core::setup_sync::Status`. */
+export interface SetupSyncStatus {
+  enabled: boolean;
+  /** Newest first. */
+  recent: SetupPush[];
+}
+
+export const setupSyncStatus = () =>
+  invoke<SetupSyncStatus>("setup_sync_status");
+
 /** Reveal the sessions folder in Explorer. */
 export const openSessionsDir = () => invoke<void>("open_sessions_dir");
 

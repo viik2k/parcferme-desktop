@@ -17,6 +17,7 @@ pub mod options;
 pub mod paths;
 pub mod session;
 pub mod settings;
+pub mod setup_sync;
 pub mod sim;
 pub mod sync;
 pub mod team_sync;

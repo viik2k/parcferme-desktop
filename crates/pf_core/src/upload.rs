@@ -338,6 +338,11 @@ pub struct UploadOutcome {
 /// failure there is reported in [`UploadOutcome::export`] rather than raised:
 /// an upload that already succeeded must not surface as an error, and a setup
 /// with no export must still upload exactly as it did before (issue #3).
+///
+/// `setup` and `session` are SERVER_CONTRACT §7c: push as a new version of
+/// that setup, and link it to the recording it was saved during. A success is
+/// remembered by [`crate::setup_sync`], so a later save of the same file is
+/// pushed as a version of this setup rather than a new one.
 #[allow(clippy::too_many_arguments)]
 pub fn upload_setup(
     path: &Path,
@@ -349,6 +354,8 @@ pub fn upload_setup(
     notes: Option<&str>,
     private: bool,
     garage_export: Option<&Path>,
+    setup: Option<&str>,
+    session: Option<u64>,
 ) -> Result<UploadOutcome> {
     // File checks first — cheap, pure, and they keep obviously-bad input from
     // ever touching the keychain or the network.
@@ -360,15 +367,16 @@ pub fn upload_setup(
 
     // Sims that file by track can't place the setup without one, and the server
     // rejects the metadata outright — say so plainly instead of surfacing an HTTP
-    // error the user can't act on.
-    if sim.needs_track_folder() && track.is_none_or(|t| t.trim().is_empty()) {
+    // error the user can't act on. A version inherits its setup's track.
+    if setup.is_none() && sim.needs_track_folder() && track.is_none_or(|t| t.trim().is_empty()) {
         return Err(Error::Api(format!(
             "{} files setups by track, so this upload needs a track before it can be shared",
             sim.display_name()
         )));
     }
 
-    let size = std::fs::metadata(path)?.len();
+    let meta = std::fs::metadata(path)?;
+    let size = meta.len();
     if size > MAX_UPLOAD_BYTES {
         return Err(Error::Api(format!(
             "{filename} is {size} bytes — setup files are a few KB, so this doesn't look like one (limit {MAX_UPLOAD_BYTES})"
@@ -400,10 +408,13 @@ pub fn upload_setup(
             types,
             notes,
             private,
+            setup,
+            session,
         },
         &bytes,
     )?;
     log::info!("uploaded {filename} as setup {}", result.id);
+    crate::setup_sync::note_uploaded(path, &meta, &bytes, &result.id);
 
     let export = match garage_export {
         Some(export) => attach_garage_export(&client, token.as_str(), &result.id, export),
@@ -772,6 +783,8 @@ mod tests {
             None,
             false,
             None,
+            None,
+            None,
         );
         assert!(matches!(missing, Err(Error::Io(_))));
 
@@ -787,6 +800,8 @@ mod tests {
             &[],
             None,
             false,
+            None,
+            None,
             None,
         );
         assert!(matches!(too_big, Err(Error::Api(_))));
@@ -813,6 +828,8 @@ mod tests {
                 &[],
                 None,
                 false,
+                None,
+                None,
                 None,
             );
             assert!(matches!(err, Err(Error::Api(m)) if m.contains("track")));
