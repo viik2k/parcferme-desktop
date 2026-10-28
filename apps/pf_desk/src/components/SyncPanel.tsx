@@ -87,7 +87,7 @@ export function SyncPanel() {
           Record and upload my sessions
           <span className="mt-0.5 block text-[10px] text-muted">
             Every Le Mans Ultimate session is recorded and pushed to your
-            private library once you close the game.
+            private library when you switch car or track, or close the game.
           </span>
         </span>
         <input

@@ -13,9 +13,10 @@
 //!    from a crash, from an earlier stint, or from time spent signed out);
 //! 3. try to open the game. If it's up, record until it goes away.
 //!
-//! Pushing before recording is what keeps the two safe on one thread: the file
-//! being written is never a file being uploaded, because this loop can only do
-//! one of them at a time.
+//! A file closed mid-game (the driver switched car or track) doesn't wait for
+//! step 2: it's pushed from a helper thread once the car stops. Two rules keep
+//! that safe: a sweep never touches the file being written (see [`finished`]),
+//! and only one sweep runs at a time (see [`Pushing`]).
 //!
 //! [`status`] is the whole of what the UI sees — the engine reports, the UI
 //! never drives it.
@@ -126,6 +127,23 @@ static RECORDING: AtomicBool = AtomicBool::new(false);
 static LIVE: Mutex<Option<Live>> = Mutex::new(None);
 static LAST: Mutex<Option<LastPush>> = Mutex::new(None);
 static BLOCKED: Mutex<Option<Blocked>> = Mutex::new(None);
+static PUSHING: AtomicBool = AtomicBool::new(false);
+
+/// The right to sweep the queue, released on drop (a panicking sweep included).
+/// The engine loop and a mid-game push could otherwise upload one file twice.
+struct Pushing;
+
+impl Pushing {
+    fn claim() -> Option<Self> {
+        (!PUSHING.swap(true, Ordering::AcqRel)).then_some(Pushing)
+    }
+}
+
+impl Drop for Pushing {
+    fn drop(&mut self) {
+        PUSHING.store(false, Ordering::Release);
+    }
+}
 
 /// A poisoned lock here means a thread panicked mid-update, which costs the UI
 /// one stale status line and nothing more — never a crash.
@@ -157,18 +175,27 @@ pub fn blocked() -> Option<Blocked> {
 
 /// What the engine is doing. Cheap enough to poll on a timer.
 pub fn status() -> Status {
-    let recording = lock(&LIVE).clone();
-    let active = recording.as_ref().map(|l| l.file.clone());
     Status {
         enabled: Settings::load_default().sync_enabled,
-        pending: session::list()
-            .into_iter()
-            .filter(|s| Some(&s.file) != active.as_ref())
-            .collect(),
-        recording,
+        pending: finished(),
+        recording: lock(&LIVE).clone(),
         last_push: lock(&LAST).clone(),
         blocked: blocked(),
     }
+}
+
+/// The recordings on disk, newest first, minus the one being written.
+///
+/// Holds the `LIVE` lock across the listing, and [`open_recording`] holds it
+/// from creating a file to publishing it, so a fresh (empty) recording is never
+/// mistaken for a finished one and dropped as too small.
+fn finished() -> Vec<Session> {
+    let live = lock(&LIVE);
+    let active = live.as_ref().map(|l| l.file.as_str());
+    session::list()
+        .into_iter()
+        .filter(|s| Some(s.file.as_str()) != active)
+        .collect()
 }
 
 /// Start the engine on its own thread. Call once, at startup.
@@ -230,6 +257,7 @@ fn run() {
 
 /// Open a recording and publish it as the live one.
 fn open_recording() -> Option<session::Recorder> {
+    let mut live = lock(&LIVE);
     let rec = match session::Recorder::create() {
         Ok(rec) => rec,
         Err(e) => {
@@ -238,7 +266,7 @@ fn open_recording() -> Option<session::Recorder> {
         }
     };
     log::info!("sync: recording to {}", rec.path().display());
-    *lock(&LIVE) = Some(Live {
+    *live = Some(Live {
         file: rec
             .path()
             .file_name()
@@ -257,6 +285,10 @@ fn open_recording() -> Option<session::Recorder> {
 /// car is driven in a different car/track combo from the one this file was
 /// driven in. Otherwise a Spa stint and a Le Mans race land in one upload,
 /// labelled with whichever came first.
+///
+/// A file finished that way is pushed while the game is still up, once the car
+/// has been stopped for a few seconds — the garage, the pits or the menus —
+/// rather than mid-lap, where an upload could cost an online racer some ping.
 fn record(source: &Lmu) {
     let Some(mut rec) = open_recording() else {
         return;
@@ -265,6 +297,9 @@ fn record(source: &Lmu) {
     // The combo this file has been driven in; `None` while it's all menus.
     let mut driven: Option<(String, String)> = None;
     let mut checked = Instant::now();
+    // A finished file is waiting to be pushed, and when the car last moved.
+    let mut push_due = false;
+    let mut last_moved = Instant::now();
 
     loop {
         // Switching sync off means stop recording, not "stop after the game
@@ -275,12 +310,28 @@ fn record(source: &Lmu) {
                 log::info!("sync: switched off, recording stopped");
                 break;
             }
+            // ponytail: "stopped" is the cheap stand-in for "not racing" — a
+            // car waiting on the grid counts too. LMU's game phase is decoded
+            // in shm.rs but not on `Frame`; gate on it if that ever bites.
+            if push_due && last_moved.elapsed() >= IDLE_POLL && !PUSHING.load(Ordering::Acquire) {
+                push_due = false;
+                if let Err(e) = std::thread::Builder::new()
+                    .name("pf-sync-push".into())
+                    .spawn(|| {
+                        push_pending();
+                    })
+                {
+                    // Not lost: the sweep after the game closes picks it up.
+                    log::warn!("sync: couldn't start a mid-game push: {e}");
+                }
+            }
         }
         match source.next_frame_timeout(Duration::from_millis(250)) {
             Some(frame) => {
                 let moving = session::is_moving(frame.speed_kph) && !frame.car_name.is_empty();
                 let combo = || (frame.car_name.clone(), frame.track_name.clone());
                 if moving {
+                    last_moved = Instant::now();
                     match &driven {
                         None => driven = Some(combo()),
                         Some(d) if *d != combo() => {
@@ -288,6 +339,7 @@ fn record(source: &Lmu) {
                             let Some(next) = open_recording() else { break };
                             rec = next; // closes the finished one
                             driven = Some(combo());
+                            push_due = true;
                         }
                         Some(_) => {}
                     }
@@ -329,8 +381,12 @@ fn record(source: &Lmu) {
 /// — the file is renamed out of the queue (kept on disk as `.rejected`, so
 /// nothing is lost) instead of being re-uploaded every cycle forever.
 fn push_pending() -> bool {
+    // Someone else is sweeping, and will get to these files.
+    let Some(_claim) = Pushing::claim() else {
+        return true;
+    };
     let Ok(dir) = session::dir() else { return true };
-    let mut sessions = session::list();
+    let mut sessions = finished();
     sessions.reverse();
 
     for s in sessions {
@@ -443,6 +499,14 @@ mod tests {
         let b = Blocked::from_start_error(&Error::LmuPluginsDisabled).unwrap();
         assert_eq!(b.kind, "lmu_plugins_disabled");
         assert!(b.message.contains("Enable Plugins"));
+    }
+
+    #[test]
+    fn one_sweep_at_a_time() {
+        let first = Pushing::claim().expect("nobody else is sweeping");
+        assert!(Pushing::claim().is_none(), "a second sweep must wait");
+        drop(first);
+        assert!(Pushing::claim().is_some(), "dropping the claim frees it");
     }
 
     #[test]
