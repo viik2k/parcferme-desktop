@@ -14,7 +14,7 @@
 //! folders at once (parc-ferme#80 / this repo's #6).
 
 use std::collections::VecDeque;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -23,10 +23,15 @@ use crate::download::{self, InstallAction};
 use crate::settings::Settings;
 use crate::{Error, Result};
 
-/// How often to poll the team vault. A full HTTP round trip, and setups don't
-/// arrive nearly as often as telemetry does — no need for [`crate::sync`]'s
-/// 5 s cadence.
+/// How often to poll the team vault while setups are arriving. A full HTTP
+/// round trip, and setups don't arrive nearly as often as telemetry does — no
+/// need for [`crate::sync`]'s 5 s cadence.
 const POLL_INTERVAL: Duration = Duration::from_secs(60);
+
+/// The longest the poll backs off to when sweeps keep finding nothing new.
+/// Each poll is a server function call for every running tray app, so an idle
+/// vault shouldn't cost one a minute all day; [`poke`] brings it straight back.
+const MAX_POLL_INTERVAL: Duration = Duration::from_secs(300);
 
 /// How many recent installs [`status`] keeps for the tray-toast poller. Old
 /// entries fall off; nothing here is persisted.
@@ -55,6 +60,9 @@ pub struct Status {
 }
 
 static RECENT: Mutex<VecDeque<Installed>> = Mutex::new(VecDeque::new());
+
+/// Set by [`poke`]; the engine's sleep waits on it.
+static WAKE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
 
 /// A poisoned lock here costs the toast poller one missed batch, never a
 /// crash — same discipline as [`crate::sync`]'s `LIVE`/`LAST` locks.
@@ -86,32 +94,69 @@ pub fn spawn() {
     }
 }
 
+/// Poll now and go back to the short interval: the user is at the app (window
+/// focused, an equip just ran), so a teammate's new setup should land soon.
+pub fn poke() {
+    let (flag, cv) = &WAKE;
+    *flag.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    cv.notify_one();
+}
+
+/// The wait before the next poll: back to [`POLL_INTERVAL`] when the last
+/// sweep found something new, otherwise double it, up to [`MAX_POLL_INTERVAL`].
+fn next_interval(current: Duration, found_new: bool) -> Duration {
+    if found_new {
+        POLL_INTERVAL
+    } else {
+        (current * 2).min(MAX_POLL_INTERVAL)
+    }
+}
+
 /// The engine loop. Runs until the process exits.
 fn run() {
     // Only warn when the reason changes — a driver with no teams shouldn't
     // get a warning every minute for the rest of the session.
     let mut last_err = String::new();
+    let mut interval = POLL_INTERVAL;
     loop {
         let mut settings = Settings::load_default();
         if settings.team_auto_install_enabled {
-            match sweep(&mut settings, download::list_setups("team")) {
-                Ok(()) => last_err.clear(),
+            let found_new = match sweep(&mut settings, download::list_setups("team")) {
+                Ok(found_new) => {
+                    last_err.clear();
+                    found_new
+                }
                 Err(e) => {
                     let msg = e.to_string();
                     if msg != last_err {
                         log::warn!("team sync: {msg}");
                         last_err = msg;
                     }
+                    false
                 }
-            }
+            };
+            interval = next_interval(interval, found_new);
+        } else {
+            // Off costs no request, and turning it on shouldn't wait 5 minutes.
+            interval = POLL_INTERVAL;
         }
-        std::thread::sleep(POLL_INTERVAL);
+        let (flag, cv) = &WAKE;
+        let guard = flag.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut poked, _) = cv
+            .wait_timeout_while(guard, interval, |poked| !*poked)
+            .unwrap_or_else(|e| e.into_inner());
+        if *poked {
+            *poked = false;
+            interval = POLL_INTERVAL;
+        }
     }
 }
 
 /// One poll cycle over the team vault's `listing`: seed on first run, install
-/// the rest. The listing is passed in so tests don't reach the keychain.
-fn sweep(settings: &mut Settings, listing: Result<Vec<crate::api::SetupSummary>>) -> Result<()> {
+/// the rest. Says whether the listing held anything not seen before, which is
+/// what the poll interval backs off on. The listing is passed in so tests don't
+/// reach the keychain.
+fn sweep(settings: &mut Settings, listing: Result<Vec<crate::api::SetupSummary>>) -> Result<bool> {
     let items = listing?;
 
     if !settings.team_auto_install_seeded {
@@ -124,7 +169,14 @@ fn sweep(settings: &mut Settings, listing: Result<Vec<crate::api::SetupSummary>>
             "team sync: seeded {} existing team setup(s), none installed",
             settings.team_seen_setups.len()
         );
-        return Ok(());
+        return Ok(true);
+    }
+    // Nothing new: nothing to install or save, and the poll backs off.
+    if items
+        .iter()
+        .all(|s| settings.team_seen_setups.contains(&s.id))
+    {
+        return Ok(false);
     }
 
     for item in &items {
@@ -169,7 +221,7 @@ fn sweep(settings: &mut Settings, listing: Result<Vec<crate::api::SetupSummary>>
     if let Err(e) = settings.save_default() {
         log::warn!("team sync: couldn't persist the seen-set: {e}");
     }
-    Ok(())
+    Ok(true)
 }
 
 fn push_recent(entry: Installed) {
@@ -194,5 +246,31 @@ mod tests {
         assert!(matches!(err, Error::NotLinked));
         assert!(!settings.team_auto_install_seeded);
         assert!(settings.team_seen_setups.is_empty());
+    }
+
+    #[test]
+    fn idle_polls_back_off_to_five_minutes_and_reset_on_news() {
+        let mut d = POLL_INTERVAL;
+        let mut seen = vec![];
+        for _ in 0..5 {
+            d = next_interval(d, false);
+            seen.push(d.as_secs());
+        }
+        assert_eq!(seen, [120, 240, 300, 300, 300]);
+        assert_eq!(next_interval(d, true), POLL_INTERVAL);
+    }
+
+    /// An all-seen listing is "nothing new", so the poll backs off. It returns
+    /// before any install or save, so this never touches the network, the
+    /// keychain or the real settings.json.
+    #[test]
+    fn sweep_reports_nothing_new_when_everything_is_seen() {
+        let mut settings = Settings {
+            team_auto_install_seeded: true,
+            ..Settings::default()
+        };
+        settings.team_seen_setups.insert("a".into());
+        let item: crate::api::SetupSummary = serde_json::from_str(r#"{"id": "a"}"#).unwrap();
+        assert!(!sweep(&mut settings, Ok(vec![item])).unwrap());
     }
 }

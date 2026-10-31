@@ -432,6 +432,8 @@ pub async fn upload_setup(
             notes.as_deref().map(str::trim).filter(|n| !n.is_empty()),
             private.unwrap_or(false),
             export_path.as_deref(),
+            None,
+            None,
         )?;
         Ok(UploadedSetupDto {
             id: outcome.result.id,
@@ -485,6 +487,12 @@ pub fn run_equip(url: &str) -> EquipOutcome {
 #[tauri::command]
 pub async fn sync_status() -> Result<pf_core::sync::Status, CmdError> {
     blocking(|| Ok(sync::status())).await
+}
+
+/// What setup auto-sync has pushed this run, and whether it's on.
+#[tauri::command]
+pub async fn setup_sync_status() -> Result<pf_core::setup_sync::Status, CmdError> {
+    blocking(|| Ok(pf_core::setup_sync::status())).await
 }
 
 /// Reveal the sessions folder — the "where did my recordings go" answer, and

@@ -78,6 +78,34 @@ fn team_sync_toasts(app: &tauri::AppHandle) {
     }
 }
 
+/// One toast per setup the setup auto-sync engine pushed (or couldn't): it
+/// uploads the user's files unattended, so each one is announced. Same polled
+/// shape as [`team_sync_toasts`].
+fn setup_sync_toasts(app: &tauri::AppHandle) {
+    use std::collections::HashSet;
+    let mut toasted: HashSet<(String, u64)> = HashSet::new();
+    loop {
+        for p in pf_core::setup_sync::status().recent {
+            if toasted.insert((p.file.clone(), p.at_unix)) {
+                let _ = match (&p.error, p.version) {
+                    (Some(e), _) => notify(app, "Setup not synced", &format!("{}: {e}", p.file)),
+                    (None, Some(v)) if v > 1 => notify(
+                        app,
+                        "Setup synced",
+                        &format!("{} \u{b7} version {v}", p.file),
+                    ),
+                    (None, _) => notify(
+                        app,
+                        "Setup synced",
+                        &format!("{} \u{b7} new private setup", p.file),
+                    ),
+                };
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+}
+
 /// Toast once when the sync engine finds the game running but unrecordable
 /// (plugins disabled, #36).
 ///
@@ -153,6 +181,7 @@ fn handle_equip(app: &tauri::AppHandle, url: String) {
     }
     // Never log the URL itself — its `token` param, if present, is a secret.
     log::info!("equip deep link received");
+    pf_core::team_sync::poke(); // they're picking setups: a team one may be next
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let outcome = tauri::async_runtime::spawn_blocking(move || commands::run_equip(&url))
@@ -292,6 +321,19 @@ pub fn run() {
             // user has turned it on in Settings. Same no-shutdown reasoning —
             // an install is a single atomic write, never left half-done.
             pf_core::team_sync::spawn();
+            // Setup auto-sync: pushes setups saved in the sims folders, when
+            // the user has turned it on. An upload is one request; a kill
+            // mid-way just means the next launch sees the change again.
+            pf_core::setup_sync::spawn();
+            {
+                let toast_handle = app.handle().clone();
+                if let Err(e) = std::thread::Builder::new()
+                    .name("pf-setup-sync-toasts".into())
+                    .spawn(move || setup_sync_toasts(&toast_handle))
+                {
+                    log::error!("setup sync toast thread didn't start: {e}");
+                }
+            }
             {
                 let toast_handle = app.handle().clone();
                 if let Err(e) = std::thread::Builder::new()
@@ -322,11 +364,15 @@ pub fn run() {
         })
         // Closing the window hides to tray instead of quitting — this is a
         // background tray utility that runs alongside iRacing.
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 let _ = window.hide();
                 api.prevent_close();
             }
+            // The user is at the app: check the team vault now, and stop
+            // the idle back-off (team_sync's poll interval).
+            WindowEvent::Focused(true) => pf_core::team_sync::poke(),
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
@@ -346,6 +392,7 @@ pub fn run() {
             commands::setup_options,
             commands::upload_setup,
             commands::sync_status,
+            commands::setup_sync_status,
             commands::open_sessions_dir,
         ])
         .run(tauri::generate_context!())

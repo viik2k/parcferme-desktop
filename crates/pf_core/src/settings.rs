@@ -62,6 +62,10 @@ pub struct Settings {
     /// Team-vault setup ids already installed (or seen on the seeding poll),
     /// so a later poll never reinstalls one.
     pub team_seen_setups: HashSet<String>,
+    /// Run setup auto-sync ([`crate::setup_sync`]): push setups saved in the
+    /// sims folders to the site, private. Off until the user opts in — this one
+    /// uploads their files unattended.
+    pub setup_sync_enabled: bool,
 }
 
 impl Settings {
@@ -193,6 +197,7 @@ mod tests {
         assert!(json.contains("\"teamAutoInstallEnabled\":false"), "{json}");
         assert!(json.contains("\"teamAutoInstallSeeded\":false"), "{json}");
         assert!(json.contains("\"teamSeenSetups\":[]"), "{json}");
+        assert!(json.contains("\"setupSyncEnabled\":false"), "{json}");
     }
 
     #[test]

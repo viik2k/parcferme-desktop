@@ -174,12 +174,16 @@ pub fn download_into(
             crate::api::Failure::Transport(e) => e.to_string(),
         })
     })?;
-    write_atomic(
+    let placed = write_atomic(
         &mut resp.into_body().into_reader(),
         dest_dir,
         filename,
         policy,
-    )
+    )?;
+    // Someone else's setup, now in a sims folder: setup auto-sync must not
+    // push it back up as the user's own (SERVER_CONTRACT §7c).
+    crate::setup_sync::note_installed(&placed.0);
+    Ok(placed)
 }
 
 /// Stream `reader` into `dest_dir/<sanitized filename>` atomically: write to a
