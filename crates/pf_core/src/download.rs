@@ -295,15 +295,37 @@ fn files_identical(a: &Path, b: &Path) -> Result<bool> {
 
 /// Reduce a server-supplied name to a single, safe filename component.
 ///
-/// Strips any directory separators and parent (`..`) segments so the result
-/// can only ever land directly inside the setups directory.
+/// Strips directory separators, parent (`..`) segments, characters illegal in
+/// NTFS names (`<>:"|?*`, control chars) and trailing dots/spaces. Returns an
+/// empty string when nothing usable remains (bare dots, or a Windows reserved
+/// device name such as `CON` / `com1.txt`); callers treat empty as an error.
 pub fn sanitize_filename(name: &str) -> String {
-    name.rsplit(['/', '\\'])
+    let base = name
+        .rsplit(['/', '\\'])
         .next()
         .unwrap_or("")
-        .replace("..", "")
-        .trim()
-        .to_string()
+        .replace("..", "");
+    let cleaned: String = base
+        .chars()
+        .filter(|c| !c.is_control() && !"<>:\"|?*".contains(*c))
+        .collect();
+    let safe = cleaned.trim().trim_end_matches(['.', ' ']);
+    let stem = safe
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|p| {
+            stem.strip_prefix(p)
+                .is_some_and(|n| n.len() == 1 && matches!(n.as_bytes()[0], b'1'..=b'9'))
+        });
+    if reserved {
+        String::new()
+    } else {
+        safe.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -329,6 +351,29 @@ mod tests {
         assert_eq!(sanitize_filename("../../evil.sto"), "evil.sto");
         assert_eq!(sanitize_filename(r"C:\Windows\system32\x.sto"), "x.sto");
         assert_eq!(sanitize_filename("setup.sto"), "setup.sto");
+    }
+
+    #[test]
+    fn sanitize_rejects_windows_hazards() {
+        for bad in [
+            "...", ".", "..", "CON", "aux", "NUL", "com1", "LPT9", "con.sto", "Prn .x", "", " . ",
+        ] {
+            assert_eq!(sanitize_filename(bad), "", "{bad:?}");
+        }
+        assert_eq!(sanitize_filename("setup.sto."), "setup.sto");
+        assert_eq!(sanitize_filename("setup.sto. ."), "setup.sto");
+        assert_eq!(sanitize_filename("a:b.sto"), "ab.sto");
+        assert_eq!(sanitize_filename("a<b>\"|?*c\x01.sto"), "abc.sto");
+        assert_eq!(sanitize_filename("console.sto"), "console.sto");
+        assert_eq!(sanitize_filename("com10.sto"), "com10.sto");
+    }
+
+    #[test]
+    fn write_atomic_rejects_reserved_name() {
+        let dir = scratch("reserved");
+        let mut r: &[u8] = b"x";
+        assert!(write_atomic(&mut r, &dir, "CON", ConflictPolicy::Overwrite).is_err());
+        assert!(!dir.exists());
     }
 
     #[test]
