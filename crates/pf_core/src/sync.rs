@@ -38,12 +38,14 @@ const IDLE_POLL: Duration = Duration::from_secs(5);
 /// How long to leave the queue alone after a sweep failed offline or signed out.
 const PUSH_BACKOFF: Duration = Duration::from_secs(60);
 
-/// A recording smaller than this never saw a lap — a couple of frames from a
-/// game that opened and closed. The server has nothing to do with it.
+/// A recording smaller than this is a frame or two from a game that opened and
+/// closed. The server has nothing to do with it.
 ///
 /// ponytail: a size check, not a frame count, so the sweep doesn't read every
-/// file every cycle. One JSON line is ~600 bytes.
-const MIN_SESSION_BYTES: u64 = 4096;
+/// file every cycle. One JSON line is ~920 bytes measured (populated
+/// `lmu::Frame`, 2026-11), so 2048 is about two frames: ~0.2 s at 10 Hz.
+/// Re-measure if `Frame` grows.
+const MIN_SESSION_BYTES: u64 = 2048;
 
 /// How many `.rejected` recordings to keep. They are only kept so a driver
 /// can dig one out by hand; older ones are deleted so a season of over-size
@@ -391,7 +393,7 @@ fn push_pending() -> bool {
 
     for s in sessions {
         if s.bytes < MIN_SESSION_BYTES {
-            log::debug!(
+            log::info!(
                 "sync: dropping {} ({} bytes, nothing in it)",
                 s.file,
                 s.bytes
