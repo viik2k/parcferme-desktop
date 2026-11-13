@@ -62,6 +62,10 @@ pub struct Settings {
     /// Team-vault setup ids already installed (or seen on the seeding poll),
     /// so a later poll never reinstalls one.
     pub team_seen_setups: HashSet<String>,
+    /// Team-vault setup ids whose install failed (typically a sim that isn't
+    /// installed here). Not retried while still listed; cleared when auto-install
+    /// is toggled off.
+    pub team_failed_setups: HashSet<String>,
     /// Run setup auto-sync ([`crate::setup_sync`]): push setups saved in the
     /// sims folders to the site, private. Off until the user opts in — this one
     /// uploads their files unattended.
