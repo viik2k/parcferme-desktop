@@ -8,6 +8,9 @@ import {
 } from "../lib/auth";
 import { errorHint, toCmdError } from "../lib/errors";
 
+/** Ceiling for the poll interval so repeated `slow_down` can't back off forever. */
+const MAX_POLL_SECS = 30;
+
 type Phase = "idle" | "starting" | "waiting" | "error";
 
 /** Message + recovery hint on one line (the panel has a single error slot). */
@@ -40,9 +43,17 @@ export function ConnectPanel({
     };
   }, []);
 
-  function schedulePoll(f: DeviceFlow, intervalSecs: number) {
+  // `deadline` is the wall-clock ms at which the device code expires
+  // (RFC 8628 §3.2 `expires_in`); the server's `expired` isn't the only exit.
+  function schedulePoll(f: DeviceFlow, intervalSecs: number, deadline: number) {
+    const expire = () => {
+      setPhase("error");
+      setMessage("The code expired. Please try again.");
+    };
+    const delayMs = Math.min(intervalSecs * 1000, Math.max(0, deadline - Date.now()));
     window.setTimeout(async () => {
       if (cancelled.current) return;
+      if (Date.now() >= deadline) return expire();
       try {
         const res = await connectPoll(f.device_code);
         switch (res.status) {
@@ -50,25 +61,24 @@ export function ConnectPanel({
             onLinked(res.user);
             return;
           case "pending":
-            schedulePoll(f, intervalSecs);
+            schedulePoll(f, intervalSecs, deadline);
             return;
           case "slow_down":
-            schedulePoll(f, intervalSecs + 5);
+            schedulePoll(f, Math.min(intervalSecs + 5, MAX_POLL_SECS), deadline);
             return;
           case "denied":
             setPhase("error");
             setMessage("Approval was declined. You can try again.");
             return;
           case "expired":
-            setPhase("error");
-            setMessage("The code expired. Please try again.");
+            expire();
             return;
         }
       } catch (e) {
         setPhase("error");
         setMessage(describe(e));
       }
-    }, intervalSecs * 1000);
+    }, delayMs);
   }
 
   async function start() {
@@ -79,7 +89,7 @@ export function ConnectPanel({
       setFlow(f);
       setPhase("waiting");
       await openApproval(f);
-      schedulePoll(f, f.interval_secs);
+      schedulePoll(f, f.interval_secs, Date.now() + f.expires_in_secs * 1000);
     } catch (e) {
       setPhase("error");
       setMessage(describe(e));
