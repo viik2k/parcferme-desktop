@@ -203,6 +203,23 @@ pub fn find_garage_export(path: &Path, sim: Sim) -> Option<PathBuf> {
 /// then the matcher gets its turn, and a stale alias is still preferred to the
 /// bare folder id.
 fn resolve_car(sim: Sim, folder: &str, known: &[String]) -> (String, CarSource) {
+    // A nested iRacing chain (`mx5\mx52016`, or a flat car kept in season
+    // subfolders): a curated or exact name for any folder, deepest first.
+    // Otherwise the raw chain goes up for the site's own folder map;
+    // fuzzy-matching a path would only mislead.
+    if folder.contains('\\') {
+        return folder
+            .rsplit('\\')
+            .find_map(|part| {
+                car_aliases::resolve(sim, part)
+                    .map(|a| (a.to_string(), CarSource::Alias))
+                    .or_else(|| {
+                        car_match::exact_match(part, known)
+                            .map(|n| (n.to_string(), CarSource::Exact))
+                    })
+            })
+            .unwrap_or_else(|| (folder.to_string(), CarSource::Folder));
+    }
     let alias = car_aliases::resolve(sim, folder);
     // No list means no evidence of a rename — trust the table, as before.
     if let Some(name) =
@@ -250,6 +267,14 @@ fn locate_in_sim_tree(
     // Extra nesting past the layout (people keep per-season subfolders) is
     // ignored by the zip.
     let folders = &parts[..parts.len().saturating_sub(1)];
+
+    // iRacing nests some cars (`stockcars\chevycamarozl12022`), so its car is
+    // the whole chain. The site resolves the longest prefix it knows, and
+    // falls back to the first folder for a flat car with season subfolders
+    // (SERVER_CONTRACT §7).
+    if sim == Sim::IRacing {
+        return ((!folders.is_empty()).then(|| folders.join("\\")), None);
+    }
 
     let mut car = None;
     let mut track = None;
@@ -533,14 +558,32 @@ mod tests {
             Some("Mercedes-AMG W13 E Performance")
         );
 
-        // iRacing file nested deeper still reads the first component as the car
-        // (people keep subfolders per season) and no track.
-        let deep = identify_offline(
-            &root.join("ferrari296gt3").join("2026s3").join("r.sto"),
+        // iRacing nests some cars, so a deeper file reports the whole folder
+        // chain (the site resolves it) and no track.
+        let nested = identify_offline(
+            &root
+                .join("stockcars")
+                .join("chevycamarozl12022")
+                .join("r.sto"),
             &settings,
         );
-        assert_eq!(deep.car.as_deref(), Some("ferrari296gt3"));
-        assert_eq!(deep.track, None);
+        assert_eq!(nested.car.as_deref(), Some(r"stockcars\chevycamarozl12022"));
+        assert_eq!(nested.car_source, CarSource::Folder);
+        assert_eq!(nested.track, None);
+
+        // A curated leaf still names the car.
+        let mx5 = identify_offline(&root.join("mx5").join("mx52016").join("r.sto"), &settings);
+        assert_eq!(mx5.car.as_deref(), Some("Global Mazda MX-5 Cup"));
+
+        // A flat car kept in season subfolders: with the site's list, its first
+        // folder is an exact name; offline, the chain goes up as-is.
+        let deep = root.join("ferrari296gt3").join("2026s3").join("r.sto");
+        let listed = identify_with_cars(&deep, &settings, &cars(&["Ferrari 296 GT3"]));
+        assert_eq!(listed.car.as_deref(), Some("Ferrari 296 GT3"));
+        assert_eq!(listed.car_source, CarSource::Exact);
+        let offline = identify_offline(&deep, &settings);
+        assert_eq!(offline.car.as_deref(), Some(r"ferrari296gt3\2026s3"));
+        assert_eq!(offline.track, None);
     }
 
     #[test]
