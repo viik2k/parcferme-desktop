@@ -88,23 +88,31 @@ pub fn sim_folder_status(sim: Sim, override_dir: Option<PathBuf>) -> SimFolderSt
 /// `<track>` for LMU. Levels the sim doesn't use are ignored, so a `car` sent
 /// for an LMU setup never becomes a stray folder.
 ///
-/// Both the server-supplied `car` and `track` are sanitized to a single safe path
-/// component each, so neither can ever escape `setups_dir` (path-traversal
-/// defence, Build Plan §6). A missing/empty component is simply skipped — for a
-/// track-nesting sim that means the setup lands one level up and may not show
-/// in-game, which is better than refusing to write it.
+/// `track` is sanitized to a single safe path component. `car` may be nested
+/// (iRacing's `stockcars\chevycamarozl12022`): it splits on `\` and `/` and
+/// each part is sanitized, but a part that sanitizes to nothing or changes
+/// (`..`, `a:b`) drops the whole car, so neither value can escape `setups_dir`
+/// (path-traversal defence, Build Plan §6). A missing/empty level is simply
+/// skipped — for a track-nesting sim that means the setup lands one level up
+/// and may not show in-game, which is better than refusing to write it.
 pub fn setup_target_dir(setups_dir: &Path, sim: Sim, car: &str, track: Option<&str>) -> PathBuf {
     let mut dir = setups_dir.to_path_buf();
     for level in sim.layout() {
-        let value = match level {
-            Folder::Car => Some(car),
-            Folder::Track => track,
+        let parts = match level {
+            Folder::Car => safe_car_path(car),
+            Folder::Track => track.and_then(safe_component).map(|t| vec![t]),
         };
-        if let Some(component) = value.and_then(safe_component) {
-            dir.push(component);
-        }
+        dir.extend(parts.unwrap_or_default());
     }
     dir
+}
+
+/// A server-supplied car folder as safe path components, or `None` when it is
+/// empty or any part isn't already a clean folder name.
+fn safe_car_path(car: &str) -> Option<Vec<String>> {
+    car.split(['\\', '/'])
+        .map(|p| safe_component(p).filter(|safe| safe == p))
+        .collect()
 }
 
 /// Reduce a server-supplied folder name to a single safe path component, or
@@ -718,13 +726,41 @@ mod tests {
     #[test]
     fn target_dir_sanitizes_traversal_in_car_and_track() {
         let base = PathBuf::from("/setups");
-        // A traversal attempt in either component collapses to a single safe name.
+        // A traversal attempt in the car drops the car; in the track it
+        // collapses to a single safe name.
         assert_eq!(
             setup_target_dir(&base, Sim::Acc, "../../etc", Some("../../passwd")),
-            base.join("etc").join("passwd")
+            base.join("passwd")
         );
+        for bad in [
+            r"stockcars\..\..\x",
+            "stockcars/../x",
+            r"stockcars\",
+            r"\stockcars",
+            r"C:\x",
+            "a\u{1}b",
+        ] {
+            assert_eq!(
+                setup_target_dir(&base, Sim::IRacing, bad, None),
+                base,
+                "{bad:?}"
+            );
+        }
         // No car → write straight into the setups dir, never above it.
         assert_eq!(setup_target_dir(&base, Sim::IRacing, "", None), base);
+    }
+
+    #[test]
+    fn target_dir_keeps_nested_iracing_car_folders() {
+        let base = PathBuf::from("/setups");
+        assert_eq!(
+            setup_target_dir(&base, Sim::IRacing, r"stockcars\chevycamarozl12022", None),
+            base.join("stockcars").join("chevycamarozl12022")
+        );
+        assert_eq!(
+            setup_target_dir(&base, Sim::IRacing, "dirtsprint/winged/410", None),
+            base.join("dirtsprint").join("winged").join("410")
+        );
     }
 
     #[test]

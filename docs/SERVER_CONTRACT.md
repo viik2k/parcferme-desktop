@@ -153,6 +153,14 @@ The client (`pf_core`) routes the file by the resolved sim:
 > files land in a human-named folder and may not appear in-sim. (Carried over
 > from the M2 iRacing caveat; now applies per sim.)
 >
+> **iRacing car folders can be nested** (parc-ferme#235, 2026-11-16): the server
+> now sends iRacing's real `car_dirpath`, e.g. `stockcars\chevycamarozl12022`
+> or `dirtsprint\winged\410`, with `\` separators. The client splits `car` on
+> `\` and `/` and writes one folder per part. Every part must already be a
+> clean folder name (unchanged by the filename sanitizer: no `..`, `:`, empty
+> parts, reserved device names); otherwise the whole car is dropped and the
+> file lands in the setups root, never outside it.
+>
 > **AMS2 (read off a live install 2026-09-25, parc-ferme#140):** setups are
 > binary `.vts` files (fixed 2592 bytes, apparently encrypted), stored **flat**
 > in `Documents\Automobilista 2\savegame\<steam id>\automobilista 2\vehiclesetups_1_6\`.
@@ -221,7 +229,7 @@ a setup owned by the device token's linked user.
 | :--------- | :------- | :----------------------------------------------------------- |
 | `filename`  | yes      | file name as on disk, e.g. `quali_spa.json`                  |
 | `sim`       | yes      | `"iracing"` \| `"acc"` \| `"lmu"` \| `"ams2"`                  |
-| `car`       | new setup| the sim's **internal car folder id** as found on disk         |
+| `car`       | new setup| the sim's **internal car folder id** as found on disk (iRacing: every folder between `setups\` and the file, joined with `\`; see below) |
 | `track`     | ACC, LMU | internal track folder id (see the per-sim layouts in §5)      |
 | `name`      | no       | display name typed by the user                               |
 | `types`     | no       | comma-separated setup types from §7a's `setupTypes`          |
@@ -244,6 +252,18 @@ can only infer the track (its layout has no car folder), so `car` there is
 typed by the user and won't necessarily match a folder id. iRacing uploads may
 omit `track` (the server parks them on "Unknown Track"); the form offers it as
 an optional field so the owner doesn't have to fix it on the web afterwards.
+
+#### iRacing `car` is the whole folder chain (client behaviour, added 2026-11-16)
+
+iRacing nests some cars (`stockcars\chevycamarozl12022`, `mx5\mx52016`), so an
+iRacing upload's `car` is every folder between `setups\` and the file, joined
+with `\`. That chain may also be a flat car kept in the user's own subfolders
+(`ferrari296gt3\2026s3`). The client still pre-fills a curated or exact name
+when any folder in the chain has one (deepest first), and never fuzzy-matches
+a chain. The server resolves the longest prefix its iRacing folder map knows,
+then falls back to the first folder for the normalized-name match
+(parc-ferme#235). Older servers 422 on a chain, as they did on the bare
+`stockcars` the client sent before.
 
 #### `car` may arrive as a display name (client behaviour, added 2026-07-25)
 
