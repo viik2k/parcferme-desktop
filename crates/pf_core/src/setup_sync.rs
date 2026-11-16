@@ -395,7 +395,9 @@ fn plan(
         if settling.insert(path.clone(), stamp) != Some(stamp) {
             continue; // still being written, or just noticed
         }
-        settling.remove(path);
+        // Stays in `settling` until its state stamp catches up (pushed or
+        // skipped), so a file `cycle()` does not reach is offered again next
+        // sweep instead of settling a second time.
         let Ok(bytes) = std::fs::read(path) else {
             continue;
         };
@@ -704,6 +706,40 @@ mod tests {
             (vec![(mine, Sim::IRacing)], None)
         );
 
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Files `cycle()` does not reach (past the cap) are offered every sweep
+    /// once settled, not every other one.
+    #[test]
+    fn capped_files_are_offered_every_sweep() {
+        let dir = scratch("cap");
+        let car = dir.join("mx5");
+        std::fs::create_dir_all(&car).unwrap();
+        let n = MAX_PUSHES_PER_CYCLE + 2;
+        for i in 0..n {
+            std::fs::write(car.join(format!("{i}.sto")), "a").unwrap();
+        }
+        let mut state = State::default();
+        let mut settling = HashMap::new();
+        plan(&mut state, &sweep(&dir), &mut settling); // baseline
+        for i in 0..n {
+            std::fs::write(car.join(format!("{i}.sto")), format!("edited{i}")).unwrap();
+        }
+        assert!(plan(&mut state, &sweep(&dir), &mut settling).0.is_empty());
+        let mut left = n;
+        while left > 0 {
+            let scanned = sweep(&dir);
+            let out = plan(&mut state, &scanned, &mut settling).0;
+            assert_eq!(out.len(), left, "every unpushed file offered each sweep");
+            for (p, _) in out.iter().take(MAX_PUSHES_PER_CYCLE) {
+                let (_, stamp) = scanned[p];
+                let e = state.files.entry(key(p)).or_default();
+                e.stamp = stamp; // what note_uploaded does
+                e.hash = fingerprint(&std::fs::read(p).unwrap());
+            }
+            left -= out.len().min(MAX_PUSHES_PER_CYCLE);
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
