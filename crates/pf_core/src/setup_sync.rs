@@ -434,7 +434,10 @@ fn plan(
     } else {
         None
     };
-    push.sort_by_key(|&(_, _, mtime)| mtime);
+    // Oldest first, and by path within one millisecond: `push` is built by
+    // walking a `HashMap`, so without the tie-break a run of equal-mtime files
+    // would be offered in a different order every sweep (#426).
+    push.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
     (
         push.into_iter().map(|(p, sim, _)| (p, sim)).collect(),
         ignored,
@@ -785,6 +788,50 @@ mod tests {
         assert_eq!(load(&path), state);
         std::fs::write(&path, "{ nope").unwrap();
         assert_eq!(load(&path), State::default());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    /// Files with equal mtimes must come out in a stable order. `plan()` builds
+    /// `push` by walking a `HashMap`, so map iteration order leaks into the
+    /// push order unless an explicit tie-break sorts it out; without one, which
+    /// of a run of equal-mtime files is pushed first varies between runs
+    /// (`sort_by_key` is stable, but the input order is not).
+    #[test]
+    fn equal_mtimes_push_in_path_order() {
+        let dir = scratch("tie");
+        let car = dir.join("mx5");
+        std::fs::create_dir_all(&car).unwrap();
+        // Many files, all written inside the same millisecond.
+        let names: Vec<PathBuf> = (0..16).map(|i| car.join(format!("{i:02}.sto"))).collect();
+        for p in &names {
+            std::fs::write(p, "a").unwrap();
+        }
+        let mut state = State::default();
+        let mut settling = HashMap::new();
+        plan(&mut state, &sweep(&dir), &mut settling); // baseline
+        for p in &names {
+            std::fs::write(p, "edited").unwrap();
+        }
+        assert!(plan(&mut state, &sweep(&dir), &mut settling).0.is_empty());
+
+        let scanned = sweep(&dir);
+        // The test only means something if the mtimes really do collide.
+        let distinct: std::collections::HashSet<u64> =
+            names.iter().map(|p| scanned[p].1.mtime_ms).collect();
+        if distinct.len() != 1 {
+            // Filesystem gave each write its own millisecond; nothing to assert.
+            std::fs::remove_dir_all(&dir).unwrap();
+            return;
+        }
+        let out = plan(&mut state, &scanned, &mut settling).0;
+        let got: Vec<String> = out
+            .iter()
+            .map(|(p, _)| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            got,
+            (0..16).map(|i| format!("{i:02}.sto")).collect::<Vec<_>>(),
+            "equal-mtime files must be offered in path order"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
