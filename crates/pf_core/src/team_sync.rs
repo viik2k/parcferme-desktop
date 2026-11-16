@@ -139,6 +139,13 @@ fn run() {
         } else {
             // Off costs no request, and turning it on shouldn't wait 5 minutes.
             interval = POLL_INTERVAL;
+            // Re-toggling is the user's retry for setups that failed to install.
+            if !settings.team_failed_setups.is_empty() {
+                settings.team_failed_setups.clear();
+                if let Err(e) = settings.save_default() {
+                    log::warn!("team sync: couldn't clear the failed-set: {e}");
+                }
+            }
         }
         let (flag, cv) = &WAKE;
         let guard = flag.lock().unwrap_or_else(|e| e.into_inner());
@@ -157,6 +164,15 @@ fn run() {
 /// what the poll interval backs off on. The listing is passed in so tests don't
 /// reach the keychain.
 fn sweep(settings: &mut Settings, listing: Result<Vec<crate::api::SetupSummary>>) -> Result<bool> {
+    sweep_with(settings, listing, download::download_setup)
+}
+
+/// [`sweep`] with the installer injected, so tests can fail it without a network.
+fn sweep_with(
+    settings: &mut Settings,
+    listing: Result<Vec<crate::api::SetupSummary>>,
+    mut install: impl FnMut(&str, &Settings) -> Result<download::InstalledSetup>,
+) -> Result<bool> {
     let items = listing?;
 
     if !settings.team_auto_install_seeded {
@@ -171,20 +187,36 @@ fn sweep(settings: &mut Settings, listing: Result<Vec<crate::api::SetupSummary>>
         );
         return Ok(true);
     }
-    // Nothing new: nothing to install or save, and the poll backs off.
-    if items
-        .iter()
-        .all(|s| settings.team_seen_setups.contains(&s.id))
-    {
+    // A failed id is retried only once it has left the listing (and so can
+    // come back as a fresh upload) or the user re-toggles auto-install; until
+    // then it costs no request. Drop ids that have left the listing.
+    let before = settings.team_failed_setups.len();
+    settings
+        .team_failed_setups
+        .retain(|id| items.iter().any(|s| &s.id == id));
+    let pruned = settings.team_failed_setups.len() != before;
+
+    // Nothing new: nothing to install, and the poll backs off.
+    let done = |settings: &Settings, id: &str| {
+        settings.team_seen_setups.contains(id) || settings.team_failed_setups.contains(id)
+    };
+    if items.iter().all(|s| done(settings, &s.id)) {
+        if pruned {
+            if let Err(e) = settings.save_default() {
+                log::warn!("team sync: couldn't persist the failed-set: {e}");
+            }
+        }
         return Ok(false);
     }
 
+    let mut installed_any = false;
     for item in &items {
-        if settings.team_seen_setups.contains(&item.id) {
+        if done(settings, &item.id) {
             continue;
         }
-        match download::download_setup(&item.id, settings) {
+        match install(&item.id, settings) {
             Ok(installed) => {
+                installed_any = true;
                 settings.team_seen_setups.insert(item.id.clone());
                 log::info!(
                     "team sync: installed {} ({:?}) -> {}",
@@ -208,12 +240,11 @@ fn sweep(settings: &mut Settings, listing: Result<Vec<crate::api::SetupSummary>>
                 log::debug!("team sync: signed out — {} item(s) wait", items.len());
                 break;
             }
-            // ponytail: logs every retry rather than deduping per id like
-            // sync.rs's last_err — fine at a 60s poll with rare failures; add
-            // per-id backoff if a permanently un-installable setup (e.g. a
-            // sim not on this machine) turns out to be noisy.
+            // Most likely permanent (a sim that isn't installed here): remember
+            // it so it isn't retried against the server every poll.
             Err(e) => {
                 log::warn!("team sync: couldn't install {}: {e}", item.name);
+                settings.team_failed_setups.insert(item.id.clone());
             }
         }
     }
@@ -221,7 +252,8 @@ fn sweep(settings: &mut Settings, listing: Result<Vec<crate::api::SetupSummary>>
     if let Err(e) = settings.save_default() {
         log::warn!("team sync: couldn't persist the seen-set: {e}");
     }
-    Ok(true)
+    // Pure failures don't reset the poll to the short interval.
+    Ok(installed_any)
 }
 
 fn push_recent(entry: Installed) {
@@ -246,6 +278,44 @@ mod tests {
         assert!(matches!(err, Error::NotLinked));
         assert!(!settings.team_auto_install_seeded);
         assert!(settings.team_seen_setups.is_empty());
+    }
+
+    fn summary(id: &str) -> crate::api::SetupSummary {
+        serde_json::from_str(&format!(r#"{{"id": "{id}"}}"#)).unwrap()
+    }
+
+    /// A setup that can't install is recorded, doesn't reset the poll to the
+    /// short interval, and isn't offered to the installer again.
+    #[test]
+    fn failed_install_is_remembered_not_retried_and_does_not_count_as_new() {
+        let mut settings = Settings {
+            team_auto_install_seeded: true,
+            ..Settings::default()
+        };
+        let mut calls = 0;
+        let mut fail = |_: &str, _: &Settings| {
+            calls += 1;
+            Err(Error::SetupNotFound)
+        };
+        assert!(!sweep_with(&mut settings, Ok(vec![summary("a")]), &mut fail).unwrap());
+        assert!(settings.team_failed_setups.contains("a"));
+        assert!(!settings.team_seen_setups.contains("a"));
+        assert!(!sweep_with(&mut settings, Ok(vec![summary("a")]), &mut fail).unwrap());
+        assert_eq!(calls, 1);
+    }
+
+    /// A failed id that leaves the listing is forgotten, so a re-upload retries.
+    #[test]
+    fn failed_id_is_pruned_when_it_leaves_the_listing() {
+        let mut settings = Settings {
+            team_auto_install_seeded: true,
+            ..Settings::default()
+        };
+        settings.team_failed_setups.insert("a".into());
+        let mut never =
+            |_: &str, _: &Settings| -> Result<download::InstalledSetup> { unreachable!() };
+        assert!(!sweep_with(&mut settings, Ok(vec![]), &mut never).unwrap());
+        assert!(settings.team_failed_setups.is_empty());
     }
 
     #[test]
