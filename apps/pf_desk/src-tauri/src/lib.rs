@@ -300,7 +300,12 @@ pub fn run() {
             // Auto-update: the frontend calls check()/downloadAndInstall() against
             // the signed latest.json endpoint (tauri.conf.json → plugins.updater);
             // process::relaunch() restarts into the new build.
-            .plugin(tauri_plugin_updater::Builder::new().build())
+            // Updater key bridge (v1.0.12): this build is signed with the old
+            // key, which tauri.conf.json still names so the bundler accepts it,
+            // but it trusts the new key (CE4A362294BB1F9C) for every update
+            // after it. The old private key was lost; releases now come from
+            // the viik2k/parc-ferme monorepo, signed with the new one.
+            .plugin(tauri_plugin_updater::Builder::new().pubkey("dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENFNEEzNjIyOTRCQjFGOUMKUldTY0g3dVVJalpLemlXc1BRWW5DNnA0Z3VkMDZ3aE4xMWdaTUV6RkZSU3FkYUhwSW1iR3doc2sK").build())
             .plugin(tauri_plugin_process::init());
     }
 
