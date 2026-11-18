@@ -206,10 +206,12 @@ fn resolve_car(sim: Sim, folder: &str, known: &[String]) -> (String, CarSource) 
     // A nested iRacing chain (`mx5\mx52016`, or a flat car kept in season
     // subfolders): a curated or exact name for any folder, deepest first.
     // Otherwise the raw chain goes up for the site's own folder map;
-    // fuzzy-matching a path would only mislead.
-    if folder.contains('\\') {
+    // fuzzy-matching a path would only mislead. Either separator is legal
+    // (SERVER_CONTRACT §5) and `paths::setup_target_dir` splits on both, so
+    // this must too — a `/` chain was being matched as one opaque string.
+    if folder.contains(['\\', '/']) {
         return folder
-            .rsplit('\\')
+            .rsplit(['\\', '/'])
             .find_map(|part| {
                 car_aliases::resolve(sim, part)
                     .map(|a| (a.to_string(), CarSource::Alias))
@@ -521,6 +523,37 @@ mod tests {
     /// these tests are about the layout, not the matcher.
     fn identify_offline(path: &Path, settings: &Settings) -> SetupIdentity {
         identify_with_cars(path, settings, &[])
+    }
+
+    #[test]
+    fn slash_separated_iracing_chain_resolves_car_like_the_backslash_form() {
+        // #438: an iRacing car may separate folders with either separator
+        // (SERVER_CONTRACT §5, and `paths::setup_target_dir` splits on both),
+        // but `resolve_car` only entered its chain branch on a backslash. A
+        // `/` chain was handed to the matcher as one opaque string and could
+        // not match a per-folder name, so the same car uploaded as a bare
+        // folder id in one case and its display name in the other.
+        let root = scratch("slash-chain");
+        let settings = scratch_settings(&root);
+        let known = cars(&["Global Mazda MX-5 Cup"]);
+
+        let back = identify_with_cars(
+            &root.join("mx5").join("mx52016").join("r.sto"),
+            &settings,
+            &known,
+        );
+        assert_eq!(
+            back.car.as_deref(),
+            Some("Global Mazda MX-5 Cup"),
+            "{back:#?}"
+        );
+        assert_eq!(back.car_source, CarSource::Alias);
+
+        // Same car, same list, but a `/`-separated chain handed straight to
+        // `resolve_car` — the form a server-created setup can carry.
+        let (name, source) = resolve_car(Sim::IRacing, "mx5/mx52016", &known);
+        assert_eq!(name, "Global Mazda MX-5 Cup");
+        assert_eq!(source, CarSource::Alias);
     }
 
     #[test]
