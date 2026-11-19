@@ -808,20 +808,17 @@ mod tests {
         let mut state = State::default();
         let mut settling = HashMap::new();
         plan(&mut state, &sweep(&dir), &mut settling); // baseline
+
+        // Pin every mtime to the same instant so the tie-break is always exercised.
+        let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         for p in &names {
             std::fs::write(p, "edited").unwrap();
+            let f = std::fs::File::options().write(true).open(p).unwrap();
+            f.set_modified(t).unwrap();
         }
         assert!(plan(&mut state, &sweep(&dir), &mut settling).0.is_empty());
 
         let scanned = sweep(&dir);
-        // The test only means something if the mtimes really do collide.
-        let distinct: std::collections::HashSet<u64> =
-            names.iter().map(|p| scanned[p].1.mtime_ms).collect();
-        if distinct.len() != 1 {
-            // Filesystem gave each write its own millisecond; nothing to assert.
-            std::fs::remove_dir_all(&dir).unwrap();
-            return;
-        }
         let out = plan(&mut state, &scanned, &mut settling).0;
         let got: Vec<String> = out
             .iter()
