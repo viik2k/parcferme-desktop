@@ -12,6 +12,8 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use serde::Serialize;
 
@@ -207,7 +209,12 @@ fn write_atomic(
     std::fs::create_dir_all(dest_dir)?;
     // Temp sibling in the same directory guarantees the rename is atomic (same
     // filesystem) and the partial file lands next to its target, not in /tmp.
-    let tmp_path = dest_dir.join(format!(".{safe}.part"));
+    // pid + counter makes it unique per write, so concurrent installs of the
+    // same name (equip links, team sync) never share it. The leading dot keeps
+    // a crash leftover out of setup sync's scan.
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = dest_dir.join(format!(".{safe}.{}-{seq}.part", std::process::id()));
 
     // Scope the file handle so it's closed before the rename (required on
     // Windows, which won't rename an open file).
@@ -217,8 +224,16 @@ fn write_atomic(
         file.sync_all()?;
     }
 
+    // Placement is check-then-rename, so serialise it: two installs racing for
+    // the same free slot would otherwise both "win" and one clobber the other.
+    // ponytail: one process-wide lock (placement is a few KB of I/O); per-dir
+    // locks if that ever matters. Doesn't cover a second app instance.
+    static PLACE: Mutex<()> = Mutex::new(());
+    let placed = {
+        let _guard = PLACE.lock().unwrap_or_else(|e| e.into_inner());
+        place_download(dest_dir, &safe, &tmp_path, policy)
+    };
     // Best-effort: never leave the temp file behind, whatever went wrong.
-    let placed = place_download(dest_dir, &safe, &tmp_path, policy);
     if placed.is_err() {
         let _ = std::fs::remove_file(&tmp_path);
     }
@@ -249,6 +264,10 @@ fn place_download(
 
     match policy {
         ConflictPolicy::Overwrite => {
+            // `std::fs::rename` replaces an existing target on every platform:
+            // rename(2) on Unix, MoveFileExW(MOVEFILE_REPLACE_EXISTING) /
+            // POSIX-semantics rename on Windows. Covered by
+            // `overwrite_replaces_contents_atomically` on the Windows CI.
             std::fs::rename(tmp, &target)?;
             Ok((target, InstallAction::Replaced))
         }
@@ -366,6 +385,43 @@ mod tests {
         assert_eq!(sanitize_filename("a<b>\"|?*c\x01.sto"), "abc.sto");
         assert_eq!(sanitize_filename("console.sto"), "console.sto");
         assert_eq!(sanitize_filename("com10.sto"), "com10.sto");
+    }
+
+    #[test]
+    fn concurrent_installs_of_one_name_each_keep_their_own_bytes() {
+        let dir = scratch("concurrent");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Large enough that the copies overlap; distinct per writer.
+        let sources: Vec<Vec<u8>> = (0..8u8).map(|i| vec![b'a' + i; 256 * 1024]).collect();
+        let barrier = std::sync::Barrier::new(sources.len());
+        let placed: Vec<PathBuf> = std::thread::scope(|s| {
+            let handles: Vec<_> = sources
+                .iter()
+                .map(|src| {
+                    let (dir, barrier) = (&dir, &barrier);
+                    s.spawn(move || {
+                        barrier.wait();
+                        let path = write(dir, src, "race.sto", ConflictPolicy::KeepBoth).0;
+                        assert_eq!(&std::fs::read(&path).unwrap(), src, "{path:?}");
+                        path
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+
+        let unique: std::collections::HashSet<_> = placed.iter().collect();
+        assert_eq!(unique.len(), sources.len(), "each install got its own file");
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|n| n.ends_with(".part"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
